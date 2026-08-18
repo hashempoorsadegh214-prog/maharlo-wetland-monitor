@@ -1,10 +1,18 @@
 <!DOCTYPE html>
 <html lang="fa" dir="rtl">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <title>سامانه پایش تالاب مهارلو</title>
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>
+        سامانه پایش تالاب مهارلو
+    </title>
 
     <link
         rel="stylesheet"
@@ -12,187 +20,457 @@
     >
 
     <style>
+
         * {
             box-sizing: border-box;
         }
 
         body {
+
             margin: 0;
-            font-family: Tahoma, Arial, sans-serif;
+
+            font-family:
+                Tahoma,
+                Arial,
+                sans-serif;
+
         }
 
         header {
+
             height: 60px;
+
             background: #f28c28;
+
             color: white;
+
             display: flex;
+
             align-items: center;
+
             justify-content: center;
+
             font-size: 20px;
+
             font-weight: bold;
+
         }
 
         #map {
-            height: calc(100vh - 60px);
+
             width: 100%;
+
+            height:
+                calc(
+                    100vh - 60px
+                );
+
         }
 
         .panel {
+
             position: absolute;
+
             top: 75px;
+
             right: 15px;
+
             z-index: 1000;
-            width: 330px;
-            max-width: calc(100% - 30px);
+
+            width: 350px;
+
+            max-width:
+                calc(
+                    100% - 30px
+                );
+
             background: white;
-            padding: 15px;
-            border-radius: 12px;
-            box-shadow: 0 3px 15px rgba(0,0,0,.2);
+
+            padding: 16px;
+
+            border-radius: 13px;
+
+            box-shadow:
+                0 3px 15px
+                rgba(
+                    0,
+                    0,
+                    0,
+                    .20
+                );
+
         }
 
         .title {
+
             font-size: 18px;
+
             font-weight: bold;
+
             margin-bottom: 12px;
+
         }
 
-        .row {
-            display: flex;
-            justify-content: space-between;
-            padding: 7px 0;
-            border-bottom: 1px solid #eee;
-            font-size: 13px;
+        .big-date {
+
+            text-align: center;
+
+            font-size: 20px;
+
+            font-weight: bold;
+
+            margin:
+                8px 0
+                12px;
+
+        }
+
+        .water-title {
+
+            text-align: center;
+
+            font-size: 12px;
+
+            color: #555;
+
         }
 
         .water-value {
-            font-size: 24px;
-            font-weight: bold;
-            margin: 14px 0 5px;
+
             text-align: center;
+
+            font-size: 29px;
+
+            font-weight: bold;
+
+            margin-top: 4px;
+
         }
 
-        .water-label {
-            text-align: center;
-            font-size: 12px;
-            color: #666;
+        .row {
+
+            display: flex;
+
+            justify-content:
+                space-between;
+
+            border-bottom:
+                1px solid #eee;
+
+            padding:
+                6px 0;
+
+            font-size: 13px;
+
+        }
+
+        .slider {
+
+            width: 100%;
+
+            margin-top: 15px;
+
+        }
+
+        .slider-labels {
+
+            display: flex;
+
+            justify-content:
+                space-between;
+
+            gap: 4px;
+
+            overflow-x: auto;
+
+            margin-top: 8px;
+
+        }
+
+        .date-label {
+
+            white-space:
+                nowrap;
+
+            font-size: 10px;
+
+            color: #555;
+
         }
 
         .button {
+
             width: 100%;
+
             margin-top: 12px;
+
             padding: 10px;
+
             border: none;
+
             border-radius: 8px;
-            background: #0066ff;
+
+            background:
+                #0066ff;
+
             color: white;
-            font-family: inherit;
-            cursor: pointer;
+
+            font-family:
+                inherit;
+
+            cursor:
+                pointer;
+
         }
 
         .button.active {
-            background: #0050b8;
+
+            background:
+                #0050b8;
+
         }
 
         .status {
+
             margin-top: 8px;
+
             font-size: 12px;
+
         }
+
+        .error {
+
+            color:
+                #b42318;
+
+        }
+
+        @media (
+            max-width: 600px
+        ) {
+
+            .panel {
+
+                top: 70px;
+
+                right: 10px;
+
+                left: 10px;
+
+                width:
+                    auto;
+
+            }
+
+        }
+
     </style>
+
 </head>
+
 
 <body>
 
+
 <header>
+
     سامانه پایش تالاب مهارلو
+
 </header>
+
 
 <div id="map"></div>
 
+
 <div class="panel">
 
+
     <div class="title">
-        پایش تالاب مهارلو
+
+        پایش آبگیری تالاب
+
     </div>
 
-    <div class="row">
-        <span>تاریخ تصویر</span>
-        <b id="imageDate">---</b>
-    </div>
 
-    <div class="row">
-        <span>پوشش ابر</span>
-        <b id="cloud">---</b>
-    </div>
-
-    <div class="water-value" id="waterArea">
+    <div
+        class="big-date"
+        id="selectedDate"
+    >
         ---
     </div>
 
-    <div class="water-label">
-        هکتار آبگیری
+
+    <div class="water-title">
+
+        میزان آبگیری
+
     </div>
+
+
+    <div
+        class="water-value"
+        id="waterArea"
+    >
+        ---
+    </div>
+
+
+    <div
+        class="water-title"
+    >
+
+        هکتار
+
+    </div>
+
+
+    <div class="row">
+
+        <span>
+            پوشش ابر
+        </span>
+
+        <b id="cloud">
+            ---
+        </b>
+
+    </div>
+
+
+    <input
+        id="dateSlider"
+        class="slider"
+        type="range"
+        min="0"
+        max="0"
+        value="0"
+    >
+
+
+    <div
+        id="dateLabels"
+        class="slider-labels"
+    ></div>
+
 
     <button
         id="waterButton"
         class="button"
         onclick="toggleWater()"
     >
+
         نمایش محدوده آب
+
     </button>
+
 
     <div
         id="status"
         class="status"
     >
+
         در حال بارگذاری...
+
     </div>
+
 
 </div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+></script>
+
 
 <script>
 
+
+/* =====================================================
+   نقشه
+===================================================== */
+
+
 const map =
-    L.map("map").setView(
-        [29.43, 52.82],
+    L.map(
+        "map"
+    ).setView(
+        [
+            29.43,
+            52.82
+        ],
         10
     );
 
+
 L.tileLayer(
+
     "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+
     {
+
         attribution:
             "&copy; OpenStreetMap contributors"
+
     }
-).addTo(map);
+
+).addTo(
+    map
+);
 
 
-let wetlandLayer = null;
-let rgbLayer = null;
-let waterLayer = null;
-let waterVisible = false;
+/* =====================================================
+   متغیرها
+===================================================== */
 
 
-/* ==========================================
+let wetlandLayer =
+    null;
+
+let rgbLayer =
+    null;
+
+let waterLayer =
+    null;
+
+let archive =
+    null;
+
+let selectedItem =
+    null;
+
+let waterVisible =
+    false;
+
+
+/* =====================================================
    شروع
-========================================== */
+===================================================== */
+
 
 async function start() {
 
+
     try {
 
-        /* ----------------------------------
-           مرز تالاب
-        ---------------------------------- */
+
+        /* -----------------------------------------
+           مرز
+        ----------------------------------------- */
+
 
         const geoResponse =
             await fetch(
-                "bestar_talab_maharlo.geojson?" +
+
+                "bestar_talab_maharlo.geojson?"
+                +
                 Date.now()
+
             );
 
-        if (!geoResponse.ok) {
+
+        if (
+            !geoResponse.ok
+        ) {
 
             throw new Error(
                 "مرز تالاب پیدا نشد."
@@ -207,242 +485,484 @@ async function start() {
 
         wetlandLayer =
             L.geoJSON(
+
                 geojson,
+
                 {
+
                     style: {
-                        color: "#0066ff",
-                        weight: 3,
-                        fillOpacity: 0
+
+                        color:
+                            "#0066ff",
+
+                        weight:
+                            3,
+
+                        fillOpacity:
+                            0
+
                     }
+
                 }
-            ).addTo(map);
+
+            ).addTo(
+                map
+            );
 
 
         const bounds =
-            wetlandLayer.getBounds();
+            wetlandLayer
+            .getBounds();
 
 
-        if (bounds.isValid()) {
+        if (
+            bounds.isValid()
+        ) {
 
             map.fitBounds(
+
                 bounds,
+
                 {
-                    padding: [20,20]
+
+                    padding:
+                        [
+                            20,
+                            20
+                        ]
+
                 }
+
             );
 
         }
 
 
-        /* ----------------------------------
-           اطلاعات
-        ---------------------------------- */
+        /* -----------------------------------------
+           آرشیو
+        ----------------------------------------- */
 
-        const dataResponse =
+
+        const archiveResponse =
             await fetch(
-                "data/wetland-data.json?" +
+
+                "data/archive.json?"
+                +
                 Date.now()
+
             );
 
 
-        if (!dataResponse.ok) {
+        if (
+            !archiveResponse.ok
+        ) {
 
             throw new Error(
-                "اطلاعات تالاب پیدا نشد."
+                "آرشیو تصاویر پیدا نشد."
             );
 
         }
 
 
-        const data =
-            await dataResponse.json();
+        archive =
+            await archiveResponse.json();
 
-
-        /* ----------------------------------
-           تاریخ
-        ---------------------------------- */
 
         if (
-            data.image &&
-            data.image.date
+            !archive.items
+            ||
+            !archive.items.length
         ) {
 
-            const date =
-                new Date(
-                    data.image.date
-                );
-
-
-            document.getElementById(
-                "imageDate"
-            ).textContent =
-                date.toLocaleDateString(
-                    "fa-IR"
-                );
+            throw new Error(
+                "در ۳۰ روز گذشته تصویر مناسبی پیدا نشد."
+            );
 
         }
 
 
-        /* ----------------------------------
-           ابر
-        ---------------------------------- */
+        /* -----------------------------------------
+           ساخت اسلایدر
+        ----------------------------------------- */
 
-        if (
-            data.image &&
-            data.image.cloud_cover != null
-        ) {
 
+        const slider =
             document.getElementById(
-                "cloud"
-            ).textContent =
-                Number(
-                    data.image.cloud_cover
-                ).toFixed(1)
-                + "%";
-
-        }
+                "dateSlider"
+            );
 
 
-        /* ----------------------------------
-           مساحت آب
-        ---------------------------------- */
+        slider.max =
+            archive.items.length - 1;
 
-        if (
-            data.water &&
-            data.water.water_area_ha != null
-        ) {
 
-            document.getElementById(
-                "waterArea"
-            ).textContent =
-                Number(
-                    data.water.water_area_ha
-                ).toLocaleString(
-                    "fa-IR",
-                    {
-                        maximumFractionDigits: 2
-                    }
+        slider.value =
+            0;
+
+
+        slider.addEventListener(
+
+            "input",
+
+            function () {
+
+                showItem(
+                    Number(
+                        this.value
+                    )
                 );
 
-        }
+            }
+
+        );
 
 
-        /* ----------------------------------
-           محدوده تصویر
-        ---------------------------------- */
-
-        const bbox =
-            data.image.bbox;
+        createDateLabels();
 
 
-        const imageBounds = [
-
-            [
-                bbox[1],
-                bbox[0]
-            ],
-
-            [
-                bbox[3],
-                bbox[2]
-            ]
-
-        ];
+        /* -----------------------------------------
+           نمایش جدیدترین روز
+        ----------------------------------------- */
 
 
-        /* ----------------------------------
-           تصویر اصلی
-        ---------------------------------- */
+        showItem(
+            0
+        );
 
-        const rgb =
-            await loadImage(
-                "data/maharlo_sentinel2.png?" +
-                Date.now()
-            );
-
-
-        const clippedRGB =
-            clipImage(
-                rgb,
-                geojson,
-                bbox
-            );
-
-
-        rgbLayer =
-            L.imageOverlay(
-                clippedRGB,
-                imageBounds,
-                {
-                    opacity: 0.85
-                }
-            ).addTo(map);
-
-
-        /* ----------------------------------
-           محدوده آب
-        ---------------------------------- */
-
-        const water =
-            await loadImage(
-                "data/maharlo_water.png?" +
-                Date.now()
-            );
-
-
-        const clippedWater =
-            clipImage(
-                water,
-                geojson,
-                bbox
-            );
-
-
-        waterLayer =
-            L.imageOverlay(
-                clippedWater,
-                imageBounds,
-                {
-                    opacity: 0.90
-                }
-            );
-
-
-        wetlandLayer.bringToFront();
-
-
-        document.getElementById(
-            "status"
-        ).textContent =
-            "اطلاعات تصویر و میزان آبگیری آماده است.";
 
     }
 
-    catch (error) {
+    catch (
+        error
+    ) {
 
-        console.error(error);
+
+        console.error(
+            error
+        );
+
 
         document.getElementById(
             "status"
         ).textContent =
             error.message;
 
+
+        document.getElementById(
+            "status"
+        ).className =
+            "status error";
+
+
     }
 
 }
 
 
-/* ==========================================
+/* =====================================================
+   برچسب تاریخ‌ها
+===================================================== */
+
+
+function createDateLabels() {
+
+
+    const container =
+        document.getElementById(
+            "dateLabels"
+        );
+
+
+    container.innerHTML =
+        "";
+
+
+    archive.items
+        .slice()
+        .reverse()
+        .forEach(
+
+            item => {
+
+                const label =
+                    document.createElement(
+                        "span"
+                    );
+
+
+                label.className =
+                    "date-label";
+
+
+                label.textContent =
+                    formatDate(
+                        item.date
+                    );
+
+
+                container
+                    .appendChild(
+                        label
+                    );
+
+            }
+
+        );
+
+}
+
+
+/* =====================================================
+   نمایش یک روز
+===================================================== */
+
+
+async function showItem(
+    index
+) {
+
+
+    selectedItem =
+        archive.items[index];
+
+
+    if (
+        !selectedItem
+    ) {
+
+        return;
+
+    }
+
+
+    /* -----------------------------------------
+       اطلاعات
+    ----------------------------------------- */
+
+
+    document.getElementById(
+        "selectedDate"
+    ).textContent =
+        formatDate(
+            selectedItem.date
+        );
+
+
+    document.getElementById(
+        "waterArea"
+    ).textContent =
+        Number(
+            selectedItem.water_area_ha
+        ).toLocaleString(
+            "fa-IR",
+            {
+                maximumFractionDigits:
+                    2
+            }
+        );
+
+
+    document.getElementById(
+        "cloud"
+    ).textContent =
+        Number(
+            selectedItem.cloud_cover
+        ).toFixed(
+            1
+        )
+        +
+        "%";
+
+
+    document.getElementById(
+        "status"
+    ).textContent =
+        "در حال نمایش تصویر...";
+
+
+    /* -----------------------------------------
+       حذف لایه‌های قبلی
+    ----------------------------------------- */
+
+
+    if (
+        rgbLayer
+    ) {
+
+        map.removeLayer(
+            rgbLayer
+        );
+
+        rgbLayer =
+            null;
+
+    }
+
+
+    if (
+        waterLayer
+    ) {
+
+        map.removeLayer(
+            waterLayer
+        );
+
+        waterLayer =
+            null;
+
+    }
+
+
+    waterVisible =
+        false;
+
+
+    const button =
+        document.getElementById(
+            "waterButton"
+        );
+
+
+    button.textContent =
+        "نمایش محدوده آب";
+
+
+    button.classList.remove(
+        "active"
+    );
+
+
+    /* -----------------------------------------
+       تصویر
+    ----------------------------------------- */
+
+
+    const bbox =
+        await getWetlandBBox();
+
+
+    const imageBounds = [
+
+        [
+            bbox[1],
+            bbox[0]
+        ],
+
+        [
+            bbox[3],
+            bbox[2]
+        ]
+
+    ];
+
+
+    const rgbImage =
+        await loadImage(
+
+            selectedItem.image
+            +
+            "?"
+            +
+            Date.now()
+
+        );
+
+
+    const clippedRGB =
+        clipImage(
+
+            rgbImage,
+
+            window.wetlandGeoJSON,
+
+            bbox
+
+        );
+
+
+    rgbLayer =
+        L.imageOverlay(
+
+            clippedRGB,
+
+            imageBounds,
+
+            {
+                opacity:
+                    0.85
+            }
+
+        ).addTo(
+            map
+        );
+
+
+    /* -----------------------------------------
+       آب
+    ----------------------------------------- */
+
+
+    const waterImage =
+        await loadImage(
+
+            selectedItem.water_image
+            +
+            "?"
+            +
+            Date.now()
+
+        );
+
+
+    const clippedWater =
+        clipImage(
+
+            waterImage,
+
+            window.wetlandGeoJSON,
+
+            bbox
+
+        );
+
+
+    waterLayer =
+        L.imageOverlay(
+
+            clippedWater,
+
+            imageBounds,
+
+            {
+                opacity:
+                    0.9
+            }
+
+        );
+
+
+    wetlandLayer.bringToFront();
+
+
+    document.getElementById(
+        "status"
+    ).textContent =
+        "تصویر آماده است.";
+
+}
+
+
+/* =====================================================
    روشن / خاموش کردن آب
-========================================== */
+===================================================== */
+
 
 function toggleWater() {
 
-    if (!waterLayer) {
 
-        alert(
-            "لایه آب آماده نیست."
-        );
+    if (
+        !waterLayer
+    ) {
 
         return;
 
@@ -455,9 +975,14 @@ function toggleWater() {
         );
 
 
-    if (!waterVisible) {
+    if (
+        !waterVisible
+    ) {
 
-        if (rgbLayer) {
+
+        if (
+            rgbLayer
+        ) {
 
             map.removeLayer(
                 rgbLayer
@@ -471,11 +996,12 @@ function toggleWater() {
         );
 
 
-        waterVisible = true;
+        waterVisible =
+            true;
 
 
         button.textContent =
-            "نمایش تصویر اصلی";
+            "نمایش تصویر ماهواره‌ای";
 
 
         button.classList.add(
@@ -488,9 +1014,9 @@ function toggleWater() {
         ).textContent =
             "محدوده آب شناسایی‌شده نمایش داده می‌شود.";
 
-    }
 
-    else {
+    } else {
+
 
         map.removeLayer(
             waterLayer
@@ -502,7 +1028,8 @@ function toggleWater() {
         );
 
 
-        waterVisible = false;
+        waterVisible =
+            false;
 
 
         button.textContent =
@@ -517,58 +1044,218 @@ function toggleWater() {
         document.getElementById(
             "status"
         ).textContent =
-            "تصویر اصلی نمایش داده می‌شود.";
+            "تصویر ماهواره‌ای نمایش داده می‌شود.";
 
     }
 
 
     wetlandLayer.bringToFront();
+
 }
 
 
-/* ==========================================
-   بارگذاری تصویر
-========================================== */
+/* =====================================================
+   دریافت BBOX
+===================================================== */
 
-function loadImage(url) {
+
+async function getWetlandBBox() {
+
+
+    if (
+        window.wetlandBBox
+    ) {
+
+        return window.wetlandBBox;
+
+    }
+
+
+    const response =
+        await fetch(
+
+            "bestar_talab_maharlo.geojson?"
+            +
+            Date.now()
+
+        );
+
+
+    const geojson =
+        await response.json();
+
+
+    window.wetlandGeoJSON =
+        geojson;
+
+
+    const points =
+        [];
+
+
+    function collect(
+        obj
+    ) {
+
+        if (
+
+            Array.isArray(obj)
+
+            &&
+
+            obj.length >= 2
+
+            &&
+
+            typeof obj[0] ===
+                "number"
+
+            &&
+
+            typeof obj[1] ===
+                "number"
+
+        ) {
+
+            points.push(
+                [
+                    obj[0],
+                    obj[1]
+                ]
+            );
+
+            return;
+
+        }
+
+
+        if (
+            Array.isArray(obj)
+        ) {
+
+            obj.forEach(
+                collect
+            );
+
+        }
+
+    }
+
+
+    collect(
+        geojson
+        .features[0]
+        .geometry
+        .coordinates
+    );
+
+
+    const minLon =
+        Math.min(
+            ...points.map(
+                p => p[0]
+            )
+        );
+
+
+    const maxLon =
+        Math.max(
+            ...points.map(
+                p => p[0]
+            )
+        );
+
+
+    const minLat =
+        Math.min(
+            ...points.map(
+                p => p[1]
+            )
+        );
+
+
+    const maxLat =
+        Math.max(
+            ...points.map(
+                p => p[1]
+            )
+        );
+
+
+    window.wetlandBBox = [
+
+        minLon,
+        minLat,
+        maxLon,
+        maxLat
+
+    ];
+
+
+    return window.wetlandBBox;
+
+}
+
+
+/* =====================================================
+   بارگذاری تصویر
+===================================================== */
+
+
+function loadImage(
+    url
+) {
+
 
     return new Promise(
-        (resolve, reject) => {
+
+        (
+            resolve,
+            reject
+        ) => {
+
 
             const image =
                 new Image();
 
 
             image.onload =
-                () => resolve(image);
+                () =>
+                    resolve(
+                        image
+                    );
 
 
             image.onerror =
-                () => reject(
-                    new Error(
-                        "فایل تصویر پیدا نشد."
-                    )
-                );
+                () =>
+                    reject(
+                        new Error(
+                            "تصویر این تاریخ پیدا نشد."
+                        )
+                    );
 
 
             image.src =
                 url;
 
         }
+
     );
 
 }
 
 
-/* ==========================================
-   برش تصویر با مرز تالاب
-========================================== */
+/* =====================================================
+   برش تصویر
+===================================================== */
+
 
 function clipImage(
     image,
     geojson,
     bbox
 ) {
+
 
     const canvas =
         document.createElement(
@@ -587,6 +1274,7 @@ function clipImage(
     canvas.width =
         width;
 
+
     canvas.height =
         height;
 
@@ -598,43 +1286,80 @@ function clipImage(
 
 
     ctx.drawImage(
+
         image,
+
         0,
         0,
+
         width,
         height
+
     );
 
 
     const minLon =
         bbox[0];
 
+
     const minLat =
         bbox[1];
 
+
     const maxLon =
         bbox[2];
+
 
     const maxLat =
         bbox[3];
 
 
-    function x(lon) {
+    function x(
+        lon
+    ) {
 
         return (
-            (lon - minLon) /
-            (maxLon - minLon)
-        ) * width;
+
+            (
+                lon -
+                minLon
+            )
+
+            /
+
+            (
+                maxLon -
+                minLon
+            )
+
+        )
+        *
+        width;
 
     }
 
 
-    function y(lat) {
+    function y(
+        lat
+    ) {
 
         return (
-            (maxLat - lat) /
-            (maxLat - minLat)
-        ) * height;
+
+            (
+                maxLat -
+                lat
+            )
+
+            /
+
+            (
+                maxLat -
+                minLat
+            )
+
+        )
+        *
+        height;
 
     }
 
@@ -647,6 +1372,7 @@ function clipImage(
 
     mask.width =
         width;
+
 
     mask.height =
         height;
@@ -663,12 +1389,15 @@ function clipImage(
 
 
     const geometry =
-        geojson.features[0].geometry;
+        geojson
+        .features[0]
+        .geometry;
 
 
     function drawPolygon(
         coords
     ) {
+
 
         mctx.beginPath();
 
@@ -678,25 +1407,55 @@ function clipImage(
             of coords
         ) {
 
+
+            if (
+                !ring
+                ||
+                ring.length <
+                    3
+            ) {
+
+                continue;
+
+            }
+
+
             const first =
                 ring[0];
 
 
             mctx.moveTo(
-                x(first[0]),
-                y(first[1])
+
+                x(
+                    first[0]
+                ),
+
+                y(
+                    first[1]
+                )
+
             );
 
 
             for (
                 let i = 1;
+
                 i < ring.length;
+
                 i++
             ) {
 
+
                 mctx.lineTo(
-                    x(ring[i][0]),
-                    y(ring[i][1])
+
+                    x(
+                        ring[i][0]
+                    ),
+
+                    y(
+                        ring[i][1]
+                    )
+
                 );
 
             }
@@ -719,9 +1478,11 @@ function clipImage(
         "Polygon"
     ) {
 
+
         drawPolygon(
             geometry.coordinates
         );
+
 
     }
 
@@ -730,10 +1491,12 @@ function clipImage(
         "MultiPolygon"
     ) {
 
+
         for (
             const polygon
             of geometry.coordinates
         ) {
+
 
             drawPolygon(
                 polygon
@@ -766,13 +1529,81 @@ function clipImage(
 }
 
 
-/* ==========================================
-   اجرا
-========================================== */
+/* =====================================================
+   تاریخ شمسی ساده
+===================================================== */
 
-start();
+
+function formatDate(
+    dateString
+) {
+
+
+    const date =
+        new Date(
+            dateString
+            +
+            "T00:00:00"
+        );
+
+
+    return date.toLocaleDateString(
+
+        "fa-IR",
+
+        {
+
+            year:
+                "numeric",
+
+            month:
+                "long",
+
+            day:
+                "numeric"
+
+        }
+
+    );
+
+}
+
+
+/* =====================================================
+   ذخیره GeoJSON در حافظه
+===================================================== */
+
+
+(async function () {
+
+
+    try {
+
+        const response =
+            await fetch(
+                "bestar_talab_maharlo.geojson?"
+                +
+                Date.now()
+            );
+
+
+        window.wetlandGeoJSON =
+            await response.json();
+
+
+    } catch (e) {
+
+        console.error(e);
+
+    }
+
+
+    start();
+
+})();
 
 </script>
 
 </body>
+
 </html>
