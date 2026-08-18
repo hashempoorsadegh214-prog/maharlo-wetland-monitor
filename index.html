@@ -12,10 +12,6 @@
     >
 
     <style>
-        * {
-            box-sizing: border-box;
-        }
-
         body {
             margin: 0;
             font-family: Tahoma, Arial, sans-serif;
@@ -28,13 +24,13 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 20px;
             font-weight: bold;
+            font-size: 20px;
         }
 
         #map {
-            width: 100%;
             height: calc(100vh - 60px);
+            width: 100%;
         }
 
         .panel {
@@ -43,32 +39,15 @@
             right: 15px;
             z-index: 1000;
             width: 320px;
-            max-width: calc(100% - 30px);
             background: white;
             padding: 15px;
             border-radius: 12px;
             box-shadow: 0 3px 15px rgba(0,0,0,.2);
         }
 
-        .title {
-            font-size: 17px;
-            font-weight: bold;
-            margin-bottom: 10px;
-        }
-
-        .status {
-            font-size: 13px;
-            color: #067647;
-            line-height: 1.8;
-        }
-
-        .error {
-            color: #b42318;
-        }
-
-        button {
+        .button {
             width: 100%;
-            margin-top: 12px;
+            margin-top: 10px;
             padding: 10px;
             border: none;
             border-radius: 8px;
@@ -78,16 +57,13 @@
             cursor: pointer;
         }
 
-        button.active {
+        .button.active {
             background: #0050b8;
         }
 
-        .info {
-            margin-top: 10px;
-            padding-top: 10px;
-            border-top: 1px solid #ddd;
+        #status {
+            margin-top: 8px;
             font-size: 13px;
-            line-height: 2;
         }
     </style>
 </head>
@@ -102,36 +78,19 @@
 
 <div class="panel">
 
-    <div class="title">
-        پایش تالاب مهارلو
-    </div>
+    <b>پایش تالاب مهارلو</b>
 
-    <div id="status" class="status">
+    <div id="status">
         در حال بارگذاری...
     </div>
 
     <button
+        class="button"
         id="waterButton"
         onclick="toggleWater()"
     >
-        نمایش محدوده آب
+        نمایش آب
     </button>
-
-    <div
-        id="info"
-        class="info"
-        style="display:none;"
-    >
-        <div>
-            نوع تصویر:
-            <b id="type">---</b>
-        </div>
-
-        <div>
-            حداکثر ابر:
-            <b id="cloud">---</b>
-        </div>
-    </div>
 
 </div>
 
@@ -139,10 +98,11 @@
 
 <script>
 
-const map = L.map("map").setView(
-    [29.43, 52.82],
-    10
-);
+const map =
+    L.map("map").setView(
+        [29.43, 52.82],
+        10
+    );
 
 L.tileLayer(
     "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
@@ -152,131 +112,74 @@ L.tileLayer(
     }
 ).addTo(map);
 
+
 let wetlandLayer = null;
 let rgbLayer = null;
 let waterLayer = null;
 let waterVisible = false;
 
 
-/* =========================================
+/* ======================================
    شروع
-========================================= */
+====================================== */
 
-async function loadSite() {
+async function start() {
 
     try {
 
-        /* -------------------------------------
-           مرز تالاب
-        ------------------------------------- */
-
-        const geoResponse = await fetch(
-            "bestar_talab_maharlo.geojson?" +
-            Date.now()
-        );
+        const geoResponse =
+            await fetch(
+                "bestar_talab_maharlo.geojson?" +
+                Date.now()
+            );
 
         if (!geoResponse.ok) {
+
             throw new Error(
                 "مرز تالاب پیدا نشد."
             );
+
         }
+
 
         const geojson =
             await geoResponse.json();
 
 
-        wetlandLayer = L.geoJSON(
-            geojson,
-            {
-                style: {
-                    color: "#0066ff",
-                    weight: 3,
-                    fillColor: "#00aaff",
-                    fillOpacity: 0.08
-                }
-            }
-        ).addTo(map);
-
-
-        const wetlandBounds =
-            wetlandLayer.getBounds();
-
-
-        if (wetlandBounds.isValid()) {
-
-            map.fitBounds(
-                wetlandBounds,
+        wetlandLayer =
+            L.geoJSON(
+                geojson,
                 {
-                    padding: [20,20]
+                    style: {
+                        color: "#0066ff",
+                        weight: 3,
+                        fillOpacity: 0
+                    }
                 }
-            );
-
-        }
+            ).addTo(map);
 
 
-        /* -------------------------------------
-           اطلاعات
-        ------------------------------------- */
-
-        const response = await fetch(
-            "data/wetland-data.json?" +
-            Date.now()
+        map.fitBounds(
+            wetlandLayer.getBounds()
         );
 
-        if (!response.ok) {
 
-            throw new Error(
-                "فایل اطلاعات پیدا نشد."
+        const dataResponse =
+            await fetch(
+                "data/wetland-data.json?" +
+                Date.now()
             );
 
-        }
 
         const data =
-            await response.json();
+            await dataResponse.json();
 
-
-        document.getElementById(
-            "type"
-        ).textContent =
-            data.image?.type ||
-            "Sentinel-2 L2A";
-
-
-        document.getElementById(
-            "cloud"
-        ).textContent =
-            data.image?.max_cloud != null
-                ? data.image.max_cloud + "%"
-                : "---";
-
-
-        document.getElementById(
-            "info"
-        ).style.display =
-            "block";
-
-
-        /* -------------------------------------
-           محدوده تصویر
-        ------------------------------------- */
 
         const bbox =
-            data.image?.bbox;
+            data.image.bbox;
 
 
-        if (
-            !bbox ||
-            bbox.length !== 4
-        ) {
-
-            throw new Error(
-                "محدوده تصویر مشخص نیست."
-            );
-
-        }
-
-
-        const imageBounds = [
+        const bounds = [
 
             [
                 bbox[1],
@@ -291,24 +194,20 @@ async function loadSite() {
         ];
 
 
-        /* -------------------------------------
+        /* ======================================
            تصویر اصلی
-        ------------------------------------- */
+        ====================================== */
 
-        const rgbURL =
-            "data/maharlo_sentinel2.png?" +
-            Date.now();
-
-
-        const rgbImage =
+        const rgb =
             await loadImage(
-                rgbURL
+                "data/maharlo_sentinel2.png?" +
+                Date.now()
             );
 
 
         const clippedRGB =
-            createClippedImage(
-                rgbImage,
+            clipImage(
+                rgb,
                 geojson,
                 bbox
             );
@@ -317,31 +216,27 @@ async function loadSite() {
         rgbLayer =
             L.imageOverlay(
                 clippedRGB,
-                imageBounds,
+                bounds,
                 {
-                    opacity: 0.85
+                    opacity: .85
                 }
             ).addTo(map);
 
 
-        /* -------------------------------------
+        /* ======================================
            لایه آب
-        ------------------------------------- */
+        ====================================== */
 
-        const waterURL =
-            "data/maharlo_water.png?" +
-            Date.now();
-
-
-        const waterImage =
+        const water =
             await loadImage(
-                waterURL
+                "data/maharlo_water.png?" +
+                Date.now()
             );
 
 
         const clippedWater =
-            createClippedImage(
-                waterImage,
+            clipImage(
+                water,
                 geojson,
                 bbox
             );
@@ -350,55 +245,47 @@ async function loadSite() {
         waterLayer =
             L.imageOverlay(
                 clippedWater,
-                imageBounds,
+                bounds,
                 {
-                    opacity: 0.90
+                    opacity: 1
                 }
             );
 
 
-        /* -------------------------------------
-           پایان
-        ------------------------------------- */
+        document.getElementById(
+            "status"
+        ).textContent =
+            "تصویر آماده است.";
+
 
         wetlandLayer.bringToFront();
 
+    }
+
+    catch (e) {
+
+        console.error(e);
 
         document.getElementById(
             "status"
         ).textContent =
-            "تصویر Sentinel-2 آماده است.";
+            e.message;
 
     }
 
-    catch (error) {
-
-        console.error(error);
-
-        document.getElementById(
-            "status"
-        ).textContent =
-            error.message;
-
-        document.getElementById(
-            "status"
-        ).className =
-            "status error";
-
-    }
 }
 
 
-/* =========================================
-   روشن / خاموش کردن آب
-========================================= */
+/* ======================================
+   نمایش آب
+====================================== */
 
 function toggleWater() {
 
     if (!waterLayer) {
 
         alert(
-            "لایه آب آماده نشده است."
+            "لایه آب آماده نیست."
         );
 
         return;
@@ -413,29 +300,28 @@ function toggleWater() {
 
     if (!waterVisible) {
 
-        if (rgbLayer) {
+        map.removeLayer(
+            rgbLayer
+        );
 
-            map.removeLayer(
-                rgbLayer
-            );
-
-        }
-
-        waterLayer.addTo(map);
+        waterLayer.addTo(
+            map
+        );
 
         waterVisible = true;
 
         button.textContent =
-            "نمایش تصویر ماهواره‌ای";
+            "نمایش تصویر اصلی";
 
         button.classList.add(
             "active"
         );
 
+
         document.getElementById(
             "status"
         ).textContent =
-            "محدوده آب شناسایی‌شده نمایش داده می‌شود.";
+            "آب شناسایی‌شده نمایش داده می‌شود.";
 
     }
 
@@ -445,25 +331,24 @@ function toggleWater() {
             waterLayer
         );
 
-        if (rgbLayer) {
-
-            rgbLayer.addTo(map);
-
-        }
+        rgbLayer.addTo(
+            map
+        );
 
         waterVisible = false;
 
         button.textContent =
-            "نمایش محدوده آب";
+            "نمایش آب";
 
         button.classList.remove(
             "active"
         );
 
+
         document.getElementById(
             "status"
         ).textContent =
-            "تصویر Sentinel-2 نمایش داده می‌شود.";
+            "تصویر اصلی نمایش داده می‌شود.";
 
     }
 
@@ -472,9 +357,9 @@ function toggleWater() {
 }
 
 
-/* =========================================
-   بارگذاری تصویر
-========================================= */
+/* ======================================
+   خواندن تصویر
+====================================== */
 
 function loadImage(url) {
 
@@ -485,22 +370,14 @@ function loadImage(url) {
                 new Image();
 
             image.onload =
-                function() {
-
-                    resolve(image);
-
-                };
+                () => resolve(image);
 
             image.onerror =
-                function() {
-
-                    reject(
-                        new Error(
-                            "فایل تصویر قابل بارگذاری نیست."
-                        )
-                    );
-
-                };
+                () => reject(
+                    new Error(
+                        "فایل تصویر پیدا نشد."
+                    )
+                );
 
             image.src =
                 url;
@@ -510,11 +387,11 @@ function loadImage(url) {
 }
 
 
-/* =========================================
-   برش تصویر با مرز تالاب
-========================================= */
+/* ======================================
+   بریدن تصویر با مرز تالاب
+====================================== */
 
-function createClippedImage(
+function clipImage(
     image,
     geojson,
     bbox
@@ -525,15 +402,11 @@ function createClippedImage(
             "canvas"
         );
 
-
     const width =
-        image.naturalWidth ||
-        image.width;
-
+        image.naturalWidth;
 
     const height =
-        image.naturalHeight ||
-        image.height;
+        image.naturalHeight;
 
 
     canvas.width =
@@ -544,7 +417,9 @@ function createClippedImage(
 
 
     const ctx =
-        canvas.getContext("2d");
+        canvas.getContext(
+            "2d"
+        );
 
 
     ctx.drawImage(
@@ -569,7 +444,7 @@ function createClippedImage(
         bbox[3];
 
 
-    function lonToX(lon) {
+    function x(lon) {
 
         return (
             (lon - minLon) /
@@ -579,7 +454,7 @@ function createClippedImage(
     }
 
 
-    function latToY(lat) {
+    function y(lat) {
 
         return (
             (maxLat - lat) /
@@ -594,7 +469,6 @@ function createClippedImage(
             "canvas"
         );
 
-
     mask.width =
         width;
 
@@ -602,43 +476,38 @@ function createClippedImage(
         height;
 
 
-    const maskCtx =
-        mask.getContext("2d");
+    const mctx =
+        mask.getContext(
+            "2d"
+        );
 
 
-    maskCtx.fillStyle =
-        "#ffffff";
+    mctx.fillStyle =
+        "white";
+
+
+    const geometry =
+        geojson.features[0].geometry;
 
 
     function drawPolygon(
-        coordinates
+        coords
     ) {
 
-        maskCtx.beginPath();
+        mctx.beginPath();
+
 
         for (
-            const ring of coordinates
+            const ring
+            of coords
         ) {
 
-            if (
-                !ring ||
-                ring.length < 3
-            ) {
-                continue;
-            }
-
-
-            const first =
+            const p =
                 ring[0];
 
-
-            maskCtx.moveTo(
-                lonToX(
-                    first[0]
-                ),
-                latToY(
-                    first[1]
-                )
+            mctx.moveTo(
+                x(p[0]),
+                y(p[1])
             );
 
 
@@ -648,38 +517,21 @@ function createClippedImage(
                 i++
             ) {
 
-                const point =
-                    ring[i];
-
-
-                maskCtx.lineTo(
-                    lonToX(
-                        point[0]
-                    ),
-                    latToY(
-                        point[1]
-                    )
+                mctx.lineTo(
+                    x(ring[i][0]),
+                    y(ring[i][1])
                 );
 
             }
 
+            mctx.closePath();
 
-            maskCtx.closePath();
         }
 
 
-        maskCtx.fill(
-            "evenodd"
-        );
+        mctx.fill("evenodd");
+
     }
-
-
-    const feature =
-        geojson.features[0];
-
-
-    const geometry =
-        feature.geometry;
 
 
     if (
@@ -711,14 +563,6 @@ function createClippedImage(
 
     }
 
-    else {
-
-        throw new Error(
-            "نوع مرز تالاب پشتیبانی نمی‌شود."
-        );
-
-    }
-
 
     ctx.globalCompositeOperation =
         "destination-in";
@@ -738,14 +582,11 @@ function createClippedImage(
     return canvas.toDataURL(
         "image/png"
     );
+
 }
 
 
-/* =========================================
-   اجرا
-========================================= */
-
-loadSite();
+start();
 
 </script>
 
