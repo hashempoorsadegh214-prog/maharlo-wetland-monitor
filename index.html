@@ -19,7 +19,6 @@
         body {
             margin: 0;
             font-family: Tahoma, Arial, sans-serif;
-            background: #f4f6f8;
         }
 
         header {
@@ -48,26 +47,26 @@
             background: white;
             padding: 15px;
             border-radius: 12px;
-            box-shadow: 0 3px 15px rgba(0, 0, 0, 0.2);
-            line-height: 1.8;
+            box-shadow: 0 3px 15px rgba(0,0,0,.2);
         }
 
         .title {
+            font-size: 17px;
             font-weight: bold;
             margin-bottom: 10px;
-            font-size: 17px;
         }
 
         .status {
-            color: #067647;
             font-size: 13px;
+            color: #067647;
+            line-height: 1.8;
         }
 
         .error {
             color: #b42318;
         }
 
-        .button {
+        button {
             width: 100%;
             margin-top: 12px;
             padding: 10px;
@@ -76,11 +75,10 @@
             background: #0066ff;
             color: white;
             font-family: inherit;
-            font-size: 14px;
             cursor: pointer;
         }
 
-        .button.active {
+        button.active {
             background: #0050b8;
         }
 
@@ -89,6 +87,7 @@
             padding-top: 10px;
             border-top: 1px solid #ddd;
             font-size: 13px;
+            line-height: 2;
         }
     </style>
 </head>
@@ -112,15 +111,17 @@
     </div>
 
     <button
-        id="ndwiButton"
-        class="button"
-        onclick="toggleNDWI()"
+        id="waterButton"
+        onclick="toggleWater()"
     >
-        نمایش NDWI
+        نمایش محدوده آب
     </button>
 
-    <div id="info" class="info" style="display:none;">
-
+    <div
+        id="info"
+        class="info"
+        style="display:none;"
+    >
         <div>
             نوع تصویر:
             <b id="type">---</b>
@@ -130,7 +131,6 @@
             حداکثر ابر:
             <b id="cloud">---</b>
         </div>
-
     </div>
 
 </div>
@@ -152,32 +152,32 @@ L.tileLayer(
     }
 ).addTo(map);
 
-
 let wetlandLayer = null;
 let rgbLayer = null;
-let ndwiLayer = null;
-let ndwiVisible = false;
+let waterLayer = null;
+let waterVisible = false;
 
 
-/* =========================================================
-   شروع سایت
-========================================================= */
+/* =========================================
+   شروع
+========================================= */
 
 async function loadSite() {
 
     try {
 
-        /* -------------------------------------------------
+        /* -------------------------------------
            مرز تالاب
-        ------------------------------------------------- */
+        ------------------------------------- */
 
         const geoResponse = await fetch(
-            "bestar_talab_maharlo.geojson?" + Date.now()
+            "bestar_talab_maharlo.geojson?" +
+            Date.now()
         );
 
         if (!geoResponse.ok) {
             throw new Error(
-                "فایل مرز تالاب پیدا نشد."
+                "مرز تالاب پیدا نشد."
             );
         }
 
@@ -192,7 +192,7 @@ async function loadSite() {
                     color: "#0066ff",
                     weight: 3,
                     fillColor: "#00aaff",
-                    fillOpacity: 0.10
+                    fillOpacity: 0.08
                 }
             }
         ).addTo(map);
@@ -207,48 +207,58 @@ async function loadSite() {
             map.fitBounds(
                 wetlandBounds,
                 {
-                    padding: [20, 20]
+                    padding: [20,20]
                 }
             );
 
         }
 
 
-        /* -------------------------------------------------
-           اطلاعات تصویر
-        ------------------------------------------------- */
+        /* -------------------------------------
+           اطلاعات
+        ------------------------------------- */
 
-        const dataResponse = await fetch(
-            "data/wetland-data.json?" + Date.now()
+        const response = await fetch(
+            "data/wetland-data.json?" +
+            Date.now()
         );
 
-        if (!dataResponse.ok) {
+        if (!response.ok) {
+
             throw new Error(
                 "فایل اطلاعات پیدا نشد."
             );
+
         }
 
         const data =
-            await dataResponse.json();
+            await response.json();
 
 
-        document.getElementById("type").textContent =
-            data.image?.type || "Sentinel-2 L2A";
+        document.getElementById(
+            "type"
+        ).textContent =
+            data.image?.type ||
+            "Sentinel-2 L2A";
 
 
-        document.getElementById("cloud").textContent =
+        document.getElementById(
+            "cloud"
+        ).textContent =
             data.image?.max_cloud != null
                 ? data.image.max_cloud + "%"
                 : "---";
 
 
-        document.getElementById("info").style.display =
+        document.getElementById(
+            "info"
+        ).style.display =
             "block";
 
 
-        /* -------------------------------------------------
+        /* -------------------------------------
            محدوده تصویر
-        ------------------------------------------------- */
+        ------------------------------------- */
 
         const bbox =
             data.image?.bbox;
@@ -267,14 +277,23 @@ async function loadSite() {
 
 
         const imageBounds = [
-            [bbox[1], bbox[0]],
-            [bbox[3], bbox[2]]
+
+            [
+                bbox[1],
+                bbox[0]
+            ],
+
+            [
+                bbox[3],
+                bbox[2]
+            ]
+
         ];
 
 
-        /* -------------------------------------------------
+        /* -------------------------------------
            تصویر اصلی
-        ------------------------------------------------- */
+        ------------------------------------- */
 
         const rgbURL =
             "data/maharlo_sentinel2.png?" +
@@ -282,7 +301,9 @@ async function loadSite() {
 
 
         const rgbImage =
-            await loadImage(rgbURL);
+            await loadImage(
+                rgbURL
+            );
 
 
         const clippedRGB =
@@ -293,65 +314,60 @@ async function loadSite() {
             );
 
 
-        rgbLayer = L.imageOverlay(
-            clippedRGB,
-            imageBounds,
-            {
-                opacity: 0.85
-            }
-        ).addTo(map);
+        rgbLayer =
+            L.imageOverlay(
+                clippedRGB,
+                imageBounds,
+                {
+                    opacity: 0.85
+                }
+            ).addTo(map);
 
 
-        /* -------------------------------------------------
-           NDWI
-           مستقیماً فایل PNG را می‌خوانیم
-        ------------------------------------------------- */
+        /* -------------------------------------
+           لایه آب
+        ------------------------------------- */
 
-        const ndwiURL =
-            "data/maharlo_ndwi.png?" +
+        const waterURL =
+            "data/maharlo_water.png?" +
             Date.now();
 
 
-        try {
-
-            await checkImageExists(
-                ndwiURL
+        const waterImage =
+            await loadImage(
+                waterURL
             );
 
 
-            ndwiLayer = L.imageOverlay(
-                ndwiURL,
+        const clippedWater =
+            createClippedImage(
+                waterImage,
+                geojson,
+                bbox
+            );
+
+
+        waterLayer =
+            L.imageOverlay(
+                clippedWater,
                 imageBounds,
                 {
-                    opacity: 0.85,
-                    interactive: false
+                    opacity: 0.90
                 }
             );
 
 
-            document.getElementById(
-                "status"
-            ).textContent =
-                "تصویر Sentinel-2 و NDWI آماده هستند.";
-
-
-        } catch (error) {
-
-            ndwiLayer = null;
-
-            document.getElementById(
-                "status"
-            ).textContent =
-                "تصویر Sentinel-2 آماده است؛ NDWI هنوز در سایت قابل دریافت نیست.";
-
-        }
-
-
-        /* -------------------------------------------------
-           مرز تالاب روی همه چیز
-        ------------------------------------------------- */
+        /* -------------------------------------
+           پایان
+        ------------------------------------- */
 
         wetlandLayer.bringToFront();
+
+
+        document.getElementById(
+            "status"
+        ).textContent =
+            "تصویر Sentinel-2 آماده است.";
 
     }
 
@@ -368,57 +384,21 @@ async function loadSite() {
             "status"
         ).className =
             "status error";
+
     }
 }
 
 
-/* =========================================================
-   بررسی وجود فایل NDWI
-========================================================= */
+/* =========================================
+   روشن / خاموش کردن آب
+========================================= */
 
-function checkImageExists(url) {
+function toggleWater() {
 
-    return new Promise(
-        (resolve, reject) => {
-
-            const img =
-                new Image();
-
-            img.onload =
-                function() {
-
-                    resolve(true);
-
-                };
-
-            img.onerror =
-                function() {
-
-                    reject(
-                        new Error(
-                            "NDWI not found"
-                        )
-                    );
-
-                };
-
-            img.src = url;
-
-        }
-    );
-}
-
-
-/* =========================================================
-   دکمه NDWI
-========================================================= */
-
-function toggleNDWI() {
-
-    if (!ndwiLayer) {
+    if (!waterLayer) {
 
         alert(
-            "فایل NDWI هنوز در سایت موجود نیست."
+            "لایه آب آماده نشده است."
         );
 
         return;
@@ -427,22 +407,26 @@ function toggleNDWI() {
 
     const button =
         document.getElementById(
-            "ndwiButton"
+            "waterButton"
         );
 
 
-    if (!ndwiVisible) {
+    if (!waterVisible) {
 
         if (rgbLayer) {
-            map.removeLayer(rgbLayer);
+
+            map.removeLayer(
+                rgbLayer
+            );
+
         }
 
-        ndwiLayer.addTo(map);
+        waterLayer.addTo(map);
 
-        ndwiVisible = true;
+        waterVisible = true;
 
         button.textContent =
-            "نمایش تصویر اصلی";
+            "نمایش تصویر ماهواره‌ای";
 
         button.classList.add(
             "active"
@@ -451,24 +435,26 @@ function toggleNDWI() {
         document.getElementById(
             "status"
         ).textContent =
-            "نمایش NDWI فعال است.";
+            "محدوده آب شناسایی‌شده نمایش داده می‌شود.";
 
     }
 
     else {
 
         map.removeLayer(
-            ndwiLayer
+            waterLayer
         );
 
         if (rgbLayer) {
+
             rgbLayer.addTo(map);
+
         }
 
-        ndwiVisible = false;
+        waterVisible = false;
 
         button.textContent =
-            "نمایش NDWI";
+            "نمایش محدوده آب";
 
         button.classList.remove(
             "active"
@@ -477,7 +463,8 @@ function toggleNDWI() {
         document.getElementById(
             "status"
         ).textContent =
-            "تصویر اصلی Sentinel-2 نمایش داده می‌شود.";
+            "تصویر Sentinel-2 نمایش داده می‌شود.";
+
     }
 
 
@@ -485,9 +472,9 @@ function toggleNDWI() {
 }
 
 
-/* =========================================================
+/* =========================================
    بارگذاری تصویر
-========================================================= */
+========================================= */
 
 function loadImage(url) {
 
@@ -497,7 +484,6 @@ function loadImage(url) {
             const image =
                 new Image();
 
-
             image.onload =
                 function() {
 
@@ -505,29 +491,28 @@ function loadImage(url) {
 
                 };
 
-
             image.onerror =
                 function() {
 
                     reject(
                         new Error(
-                            "تصویر قابل بارگذاری نیست."
+                            "فایل تصویر قابل بارگذاری نیست."
                         )
                     );
 
                 };
 
-
-            image.src = url;
+            image.src =
+                url;
 
         }
     );
 }
 
 
-/* =========================================================
-   بریدن تصویر در مرز تالاب
-========================================================= */
+/* =========================================
+   برش تصویر با مرز تالاب
+========================================= */
 
 function createClippedImage(
     image,
@@ -559,9 +544,7 @@ function createClippedImage(
 
 
     const ctx =
-        canvas.getContext(
-            "2d"
-        );
+        canvas.getContext("2d");
 
 
     ctx.drawImage(
@@ -606,23 +589,25 @@ function createClippedImage(
     }
 
 
-    const maskCanvas =
+    const mask =
         document.createElement(
             "canvas"
         );
 
 
-    maskCanvas.width =
+    mask.width =
         width;
 
-    maskCanvas.height =
+    mask.height =
         height;
 
 
     const maskCtx =
-        maskCanvas.getContext(
-            "2d"
-        );
+        mask.getContext("2d");
+
+
+    maskCtx.fillStyle =
+        "#ffffff";
 
 
     function drawPolygon(
@@ -630,7 +615,6 @@ function createClippedImage(
     ) {
 
         maskCtx.beginPath();
-
 
         for (
             const ring of coordinates
@@ -681,7 +665,6 @@ function createClippedImage(
 
 
             maskCtx.closePath();
-
         }
 
 
@@ -697,10 +680,6 @@ function createClippedImage(
 
     const geometry =
         feature.geometry;
-
-
-    maskCtx.fillStyle =
-        "#ffffff";
 
 
     if (
@@ -735,7 +714,7 @@ function createClippedImage(
     else {
 
         throw new Error(
-            "نوع هندسه تالاب پشتیبانی نمی‌شود."
+            "نوع مرز تالاب پشتیبانی نمی‌شود."
         );
 
     }
@@ -746,7 +725,7 @@ function createClippedImage(
 
 
     ctx.drawImage(
-        maskCanvas,
+        mask,
         0,
         0
     );
@@ -762,9 +741,9 @@ function createClippedImage(
 }
 
 
-/* =========================================================
+/* =========================================
    اجرا
-========================================================= */
+========================================= */
 
 loadSite();
 
