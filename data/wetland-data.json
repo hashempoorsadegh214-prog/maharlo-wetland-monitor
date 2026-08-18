@@ -1,6 +1,10 @@
 {
-  "updated_at": "2026-08-18T23:38:45.745335+00:00",
+  "updated_at": "2026-08-18T23:47:15.624814+00:00",
   "image": {
+    "id": "S2C_MSIL2A_20260818T065621_N0512_R063_T39RXN_20260818T120810",
+    "date": "2026-08-18T06:56:21.025000Z",
+    "date_only": "2026-08-18",
+    "cloud_cover": 0.0,
     "file": "data/maharlo_sentinel2.png",
     "bbox": [
       52.67413057000009,
@@ -8,21 +12,18 @@
       52.967500549000064,
       29.565711701000094
     ],
-    "type": "Sentinel-2 L2A",
-    "max_cloud": 20,
-    "period_days": 30
+    "type": "Sentinel-2 L2A"
   },
   "water": {
     "file": "data/maharlo_water.png",
     "method": "MNDWI + AWEI",
-    "mndwi": "(B03 - B11) / (B03 + B11)",
-    "awei": "4*(B03-B11) - (0.25*B08 + 2.75*B12)",
+    "mndwi": "(B03-B11)/(B03+B11)",
+    "awei": "4*(B03-B11)-(0.25*B08+2.75*B12)",
     "condition": "AWEI > -0.1 AND MNDWI > 0",
     "pixel_size_m": 20,
     "pixel_area_m2": 400,
-    "pixel_area_ha": 0.04,
-    "water_pixels": 204492,
-    "water_area_m2": 81796800,
-    "water_area_ha": 8179.68
+    "water_pixels": 0,
+    "water_area_m2": 0,
+    "water_area_ha": 0.0
   }
 }
