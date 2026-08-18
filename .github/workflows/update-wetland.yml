@@ -1,4 +1,4 @@
-name: Find Latest Sentinel-2
+name: Update Wetland Sentinel-2
 
 on:
   workflow_dispatch:
@@ -6,10 +6,11 @@ on:
     - cron: "0 */6 * * *"
 
 jobs:
-  find-image:
+  update-wetland:
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Get repository
         uses: actions/checkout@v4
 
@@ -19,136 +20,473 @@ jobs:
           python-version: "3.11"
 
       - name: Install requests
-        run: pip install requests
-
-      - name: Find Sentinel-2
         run: |
+          pip install requests
+
+      - name: Download Sentinel-2 image
+        env:
+          CDSE_CLIENT_ID: ${{ secrets.CDSE_CLIENT_ID }}
+          CDSE_CLIENT_SECRET: ${{ secrets.CDSE_CLIENT_SECRET }}
+        run: |
+
           python - <<'PY'
+
           import json
+          import os
           import requests
+
           from datetime import datetime, timedelta, timezone
 
+
+          # =========================================
+          # فایل مرز تالاب
+          # =========================================
+
           GEOJSON_FILE = "bestar_talab_maharlo.geojson"
-          OUTPUT_FILE = "data/wetland-data.json"
 
-          # خواندن مرز تالاب
-          with open(GEOJSON_FILE, "r", encoding="utf-8") as f:
-              data = json.load(f)
 
-          geometry = data["features"][0]["geometry"]
+          # =========================================
+          # خروجی‌ها
+          # =========================================
 
-          # پیدا کردن محدوده تالاب
-          all_points = []
+          IMAGE_FILE = "data/maharlo_sentinel2.png"
+          INFO_FILE = "data/wetland-data.json"
 
-          def collect(obj):
+
+          # =========================================
+          # خواندن GeoJSON
+          # =========================================
+
+          with open(
+              GEOJSON_FILE,
+              "r",
+              encoding="utf-8"
+          ) as f:
+
+              geojson = json.load(f)
+
+
+          geometry = geojson["features"][0]["geometry"]
+
+
+          # =========================================
+          # پیدا کردن Bounding Box
+          # =========================================
+
+          points = []
+
+
+          def collect_points(obj):
+
               if (
                   isinstance(obj, list)
                   and len(obj) >= 2
                   and isinstance(obj[0], (int, float))
                   and isinstance(obj[1], (int, float))
               ):
-                  all_points.append((obj[0], obj[1]))
+
+                  points.append(
+                      (
+                          obj[0],
+                          obj[1]
+                      )
+                  )
+
               elif isinstance(obj, list):
-                  for x in obj:
-                      collect(x)
 
-          collect(geometry["coordinates"])
+                  for item in obj:
+                      collect_points(item)
 
-          min_lon = min(p[0] for p in all_points)
-          min_lat = min(p[1] for p in all_points)
-          max_lon = max(p[0] for p in all_points)
-          max_lat = max(p[1] for p in all_points)
 
-          # جست‌وجوی 30 روز اخیر
-          now = datetime.now(timezone.utc)
-          start = now - timedelta(days=30)
-
-          request = {
-              "collections": ["sentinel-2-l2a"],
-              "datetime": f"{start.isoformat()}/{now.isoformat()}",
-              "bbox": [
-                  min_lon,
-                  min_lat,
-                  max_lon,
-                  max_lat
-              ],
-              "query": {
-                  "eo:cloud_cover": {
-                      "lte": 20
-                  }
-              },
-              "limit": 50,
-              "sortby": [
-                  {
-                      "field": "properties.eo:cloud_cover",
-                      "direction": "asc"
-                  }
-              ]
-          }
-
-          url = "https://stac.dataspace.copernicus.eu/v1/search"
-
-          response = requests.post(
-              url,
-              json=request,
-              timeout=120
+          collect_points(
+              geometry["coordinates"]
           )
 
-          response.raise_for_status()
 
-          results = response.json()
+          min_lon = min(
+              p[0] for p in points
+          )
 
-          features = results.get("features", [])
+          max_lon = max(
+              p[0] for p in points
+          )
 
-          if not features:
-              raise Exception(
-                  "هیچ تصویر Sentinel-2 با ابر کمتر از 20 درصد پیدا نشد."
-              )
+          min_lat = min(
+              p[1] for p in points
+          )
 
-          best = features[0]
+          max_lat = max(
+              p[1] for p in points
+          )
 
-          output = {
-              "updated_at": datetime.now(timezone.utc).isoformat(),
-              "image_id": best.get("id"),
-              "date": best.get("properties", {}).get("datetime"),
-              "cloud_cover": best.get("properties", {}).get("eo:cloud_cover"),
-              "geometry": best.get("geometry"),
-              "assets": best.get("assets", {}),
-              "wetland_bbox": [
-                  min_lon,
-                  min_lat,
-                  max_lon,
-                  max_lat
-              ]
+
+          bbox = [
+              min_lon,
+              min_lat,
+              max_lon,
+              max_lat
+          ]
+
+
+          print("Wetland BBOX:")
+          print(bbox)
+
+
+          # =========================================
+          # گرفتن Access Token
+          # =========================================
+
+          token_url = (
+              "https://identity.dataspace.copernicus.eu/"
+              "auth/realms/CDSE/protocol/openid-connect/token"
+          )
+
+
+          token_data = {
+
+              "grant_type":
+                  "client_credentials",
+
+              "client_id":
+                  os.environ[
+                      "CDSE_CLIENT_ID"
+                  ],
+
+              "client_secret":
+                  os.environ[
+                      "CDSE_CLIENT_SECRET"
+                  ]
           }
 
-          import os
-          os.makedirs("data", exist_ok=True)
 
-          with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+          token_response = requests.post(
+
+              token_url,
+
+              data=token_data,
+
+              timeout=60
+
+          )
+
+
+          if token_response.status_code != 200:
+
+              print(
+                  token_response.text
+              )
+
+              raise Exception(
+                  "Copernicus authentication failed"
+              )
+
+
+          access_token = (
+              token_response
+              .json()
+              ["access_token"]
+          )
+
+
+          # =========================================
+          # بازه جست‌وجو
+          # =========================================
+
+          now = datetime.now(
+              timezone.utc
+          )
+
+          start = (
+              now -
+              timedelta(
+                  days=30
+              )
+          )
+
+
+          # =========================================
+          # درخواست تصویر
+          # =========================================
+
+          process_url = (
+              "https://sh.dataspace.copernicus.eu/"
+              "process/v1"
+          )
+
+
+          evalscript = """
+
+          //VERSION=3
+
+          function setup() {
+
+              return {
+
+                  input: [
+                      "B02",
+                      "B03",
+                      "B04"
+                  ],
+
+                  output: {
+
+                      bands: 3
+
+                  }
+
+              };
+
+          }
+
+
+          function evaluatePixel(sample) {
+
+              return [
+
+                  2.5 * sample.B04,
+
+                  2.5 * sample.B03,
+
+                  2.5 * sample.B02
+
+              ];
+
+          }
+
+          """
+
+
+          request_body = {
+
+              "input": {
+
+                  "bounds": {
+
+                      "properties": {
+
+                          "crs":
+                          "http://www.opengis.net/def/crs/OGC/1.3/CRS84"
+
+                      },
+
+                      "bbox":
+                          bbox
+                  },
+
+
+                  "data": [
+
+                      {
+
+                          "type":
+                              "sentinel-2-l2a",
+
+                          "dataFilter": {
+
+                              "timeRange": {
+
+                                  "from":
+                                      start.isoformat(),
+
+                                  "to":
+                                      now.isoformat()
+
+                              },
+
+                              "maxCloudCoverage":
+                                  20,
+
+                              "mosaickingOrder":
+                                  "leastCC"
+
+                          }
+
+                      }
+
+                  ]
+
+              },
+
+
+              "output": {
+
+                  "width":
+                      1200,
+
+                  "height":
+                      1200,
+
+                  "responses": [
+
+                      {
+
+                          "identifier":
+                              "default",
+
+                          "format": {
+
+                              "type":
+                                  "image/png"
+
+                          }
+
+                      }
+
+                  ]
+
+              },
+
+
+              "evalscript":
+                  evalscript
+          }
+
+
+          headers = {
+
+              "Authorization":
+                  "Bearer " +
+                  access_token,
+
+              "Content-Type":
+                  "application/json"
+
+          }
+
+
+          print(
+              "Requesting Sentinel-2..."
+          )
+
+
+          response = requests.post(
+
+              process_url,
+
+              headers=headers,
+
+              json=request_body,
+
+              timeout=300
+
+          )
+
+
+          print(
+              "HTTP:",
+              response.status_code
+          )
+
+
+          if response.status_code != 200:
+
+              print(
+                  response.text[:2000]
+              )
+
+              raise Exception(
+                  "Sentinel-2 image request failed"
+              )
+
+
+          # =========================================
+          # ذخیره تصویر
+          # =========================================
+
+          os.makedirs(
+              "data",
+              exist_ok=True
+          )
+
+
+          with open(
+              IMAGE_FILE,
+              "wb"
+          ) as f:
+
+              f.write(
+                  response.content
+              )
+
+
+          # =========================================
+          # اطلاعات نتیجه
+          # =========================================
+
+          info = {
+
+              "updated_at":
+                  datetime.now(
+                      timezone.utc
+                  ).isoformat(),
+
+              "image":
+              {
+                  "file":
+                      "data/maharlo_sentinel2.png",
+
+                  "bbox":
+                      bbox,
+
+                  "max_cloud":
+                      20,
+
+                  "period_days":
+                      30,
+
+                  "type":
+                      "Sentinel-2 L2A",
+
+                  "bands":
+                      [
+                          "B04",
+                          "B03",
+                          "B02"
+                      ]
+              }
+
+          }
+
+
+          with open(
+              INFO_FILE,
+              "w",
+              encoding="utf-8"
+          ) as f:
+
               json.dump(
-                  output,
+                  info,
                   f,
                   ensure_ascii=False,
                   indent=2
               )
 
-          print("================================")
-          print("Sentinel-2 image found")
-          print("ID:", output["image_id"])
-          print("Date:", output["date"])
-          print("Cloud:", output["cloud_cover"])
-          print("================================")
+
+          print(
+              "Sentinel-2 image saved successfully."
+          )
+
           PY
 
-      - name: Save result
-        run: |
-          git config user.name "github-actions"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add data/wetland-data.json
+      # =========================================
+      # ذخیره در GitHub
+      # =========================================
+
+      - name: Save files
+        run: |
+
+          git config user.name "github-actions"
+
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add \
+            data/maharlo_sentinel2.png \
+            data/wetland-data.json
 
           git diff --cached --quiet || \
-            git commit -m "Update Sentinel-2 data"
+            git commit \
+            -m "Update Maharloo Sentinel-2 image"
 
           git push
