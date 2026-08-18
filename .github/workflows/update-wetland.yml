@@ -1,4 +1,4 @@
-name: Update Wetland Sentinel-2
+name: Update Maharloo Wetland
 
 on:
   workflow_dispatch:
@@ -7,6 +7,7 @@ on:
 
 jobs:
   update-wetland:
+
     runs-on: ubuntu-latest
 
     steps:
@@ -21,9 +22,9 @@ jobs:
 
       - name: Install packages
         run: |
-          pip install requests shapely pillow
+          pip install requests
 
-      - name: Download and clip Sentinel-2
+      - name: Download Sentinel-2 and calculate NDWI
         env:
           CDSE_CLIENT_ID: ${{ secrets.CDSE_CLIENT_ID }}
           CDSE_CLIENT_SECRET: ${{ secrets.CDSE_CLIENT_SECRET }}
@@ -37,24 +38,11 @@ jobs:
           import requests
 
           from datetime import datetime, timedelta, timezone
-          from PIL import Image, ImageDraw
-          from shapely.geometry import shape
-
-
-          # =========================================
-          # فایل‌ها
-          # =========================================
 
           GEOJSON_FILE = "bestar_talab_maharlo.geojson"
-
-          IMAGE_FILE = "data/maharlo_sentinel2.png"
-
+          RGB_FILE = "data/maharlo_sentinel2.png"
+          NDWI_FILE = "data/maharlo_ndwi.png"
           INFO_FILE = "data/wetland-data.json"
-
-
-          # =========================================
-          # خواندن مرز تالاب
-          # =========================================
 
           with open(
               GEOJSON_FILE,
@@ -64,74 +52,62 @@ jobs:
 
               geojson = json.load(f)
 
-
           geometry = geojson["features"][0]["geometry"]
 
+          points = []
 
-          # حذف Z
-          def remove_z(obj):
+          def collect_points(obj):
 
-              if isinstance(obj, list):
+              if (
+                  isinstance(obj, list)
+                  and len(obj) >= 2
+                  and isinstance(obj[0], (int, float))
+                  and isinstance(obj[1], (int, float))
+              ):
 
-                  if (
-                      len(obj) >= 2
-                      and isinstance(obj[0], (int, float))
-                      and isinstance(obj[1], (int, float))
-                  ):
+                  points.append(
+                      (obj[0], obj[1])
+                  )
 
-                      return [
-                          obj[0],
-                          obj[1]
-                      ]
+              elif isinstance(obj, list):
 
-                  return [
-                      remove_z(item)
-                      for item in obj
-                  ]
+                  for item in obj:
+                      collect_points(item)
 
-              return obj
+          collect_points(
+              geometry["coordinates"]
+          )
 
+          min_lon = min(
+              p[0] for p in points
+          )
 
-          geometry_2d = {
-              "type": geometry["type"],
-              "coordinates": remove_z(
-                  geometry["coordinates"]
-              )
-          }
+          max_lon = max(
+              p[0] for p in points
+          )
 
+          min_lat = min(
+              p[1] for p in points
+          )
 
-          polygon = shape(
-              geometry_2d
-          ).buffer(0)
-
-
-          # =========================================
-          # محدوده تالاب
-          # =========================================
-
-          minx, miny, maxx, maxy = polygon.bounds
+          max_lat = max(
+              p[1] for p in points
+          )
 
           bbox = [
-              minx,
-              miny,
-              maxx,
-              maxy
+              min_lon,
+              min_lat,
+              max_lon,
+              max_lat
           ]
-
 
           print("Wetland BBOX:")
           print(bbox)
-
-
-          # =========================================
-          # گرفتن Access Token
-          # =========================================
 
           token_url = (
               "https://identity.dataspace.copernicus.eu/"
               "auth/realms/CDSE/protocol/openid-connect/token"
           )
-
 
           token_data = {
 
@@ -139,26 +115,18 @@ jobs:
                   "client_credentials",
 
               "client_id":
-                  os.environ[
-                      "CDSE_CLIENT_ID"
-                  ],
+                  os.environ["CDSE_CLIENT_ID"],
 
               "client_secret":
-                  os.environ[
-                      "CDSE_CLIENT_SECRET"
-                  ]
+                  os.environ["CDSE_CLIENT_SECRET"]
+
           }
 
-
           token_response = requests.post(
-
               token_url,
-
               data=token_data,
-
               timeout=60
           )
-
 
           if token_response.status_code != 200:
 
@@ -170,17 +138,11 @@ jobs:
                   "Copernicus authentication failed"
               )
 
-
           access_token = (
               token_response
               .json()
               ["access_token"]
           )
-
-
-          # =========================================
-          # بازه زمانی
-          # =========================================
 
           now = datetime.now(
               timezone.utc
@@ -190,17 +152,6 @@ jobs:
               now -
               timedelta(days=30)
           )
-
-
-          # =========================================
-          # درخواست Sentinel-2
-          # =========================================
-
-          process_url = (
-              "https://sh.dataspace.copernicus.eu/"
-              "process/v1"
-          )
-
 
           evalscript = """
 
@@ -213,39 +164,58 @@ jobs:
                   input: [
                       "B02",
                       "B03",
-                      "B04"
+                      "B04",
+                      "B08"
                   ],
 
-                  output: {
+                  output: [
 
-                      bands: 3,
+                      {
+                          id: "rgb",
+                          bands: 3,
+                          sampleType: "AUTO"
+                      },
 
-                      sampleType:
-                          "AUTO"
+                      {
+                          id: "ndwi",
+                          bands: 1,
+                          sampleType: "FLOAT32"
+                      }
 
-                  }
+                  ]
 
               };
 
           }
 
-
           function evaluatePixel(sample) {
 
-              return [
+              let ndwi =
+                  (sample.B03 - sample.B08) /
+                  (sample.B03 + sample.B08);
 
-                  2.5 * sample.B04,
+              return {
 
-                  2.5 * sample.B03,
+                  rgb: [
+                      2.5 * sample.B04,
+                      2.5 * sample.B03,
+                      2.5 * sample.B02
+                  ],
 
-                  2.5 * sample.B02
+                  ndwi: [
+                      ndwi
+                  ]
 
-              ];
+              };
 
           }
 
           """
 
+          process_url = (
+              "https://sh.dataspace.copernicus.eu/"
+              "process/v1"
+          )
 
           request_body = {
 
@@ -262,8 +232,8 @@ jobs:
 
                       "bbox":
                           bbox
-                  },
 
+                  },
 
                   "data": [
 
@@ -298,7 +268,6 @@ jobs:
 
               },
 
-
               "output": {
 
                   "width":
@@ -312,12 +281,26 @@ jobs:
                       {
 
                           "identifier":
-                              "default",
+                              "rgb",
 
                           "format": {
 
                               "type":
                                   "image/png"
+
+                          }
+
+                      },
+
+                      {
+
+                          "identifier":
+                              "ndwi",
+
+                          "format": {
+
+                              "type":
+                                  "image/tiff"
 
                           }
 
@@ -332,7 +315,6 @@ jobs:
 
           }
 
-
           headers = {
 
               "Authorization":
@@ -344,204 +326,136 @@ jobs:
 
           }
 
-
           print(
-              "Downloading Sentinel-2..."
+              "Requesting Sentinel-2..."
           )
-
 
           response = requests.post(
-
               process_url,
-
               headers=headers,
-
               json=request_body,
-
               timeout=300
           )
-
 
           print(
               "HTTP:",
               response.status_code
           )
 
-
           if response.status_code != 200:
 
               print(
-                  response.text[:2000]
+                  response.text[:3000]
               )
 
               raise Exception(
-                  "Sentinel-2 download failed"
+                  "Sentinel-2 request failed"
               )
 
-
-          # =========================================
-          # ذخیره تصویر اولیه
-          # =========================================
-
-          temp_file = (
-              "data/sentinel_temp.png"
+          content_type = response.headers.get(
+              "Content-Type",
+              ""
           )
 
+          print(
+              "Content-Type:",
+              content_type
+          )
+
+          if "zip" in content_type.lower():
+
+              import zipfile
+              import io
+
+              z = zipfile.ZipFile(
+                  io.BytesIO(
+                      response.content
+                  )
+              )
+
+              print(
+                  "ZIP FILES:",
+                  z.namelist()
+              )
+
+              os.makedirs(
+                  "data",
+                  exist_ok=True
+              )
+
+              rgb_found = False
+              ndwi_found = False
+
+              for name in z.namelist():
+
+                  lower = name.lower()
+
+                  if (
+                      lower.endswith(".png")
+                      and "rgb" in lower
+                  ):
+
+                      with z.open(name) as src:
+
+                          with open(
+                              RGB_FILE,
+                              "wb"
+                          ) as dst:
+
+                              dst.write(
+                                  src.read()
+                              )
+
+                      rgb_found = True
+
+                  elif (
+                      lower.endswith(".tif")
+                      or lower.endswith(".tiff")
+                  ):
+
+                      with z.open(name) as src:
+
+                          with open(
+                              NDWI_FILE,
+                              "wb"
+                          ) as dst:
+
+                              dst.write(
+                                  src.read()
+                              )
+
+                      ndwi_found = True
+
+              if not rgb_found:
+
+                  print(
+                      "RGB file was not found in ZIP."
+                  )
+
+              if not ndwi_found:
+
+                  print(
+                      "NDWI file was not found in ZIP."
+                  )
+
+          else:
+
+              print(
+                  "Unexpected response format."
+              )
+
+              print(
+                  response.text[:1000]
+              )
+
+              raise Exception(
+                  "Unexpected Copernicus response"
+              )
 
           os.makedirs(
               "data",
               exist_ok=True
           )
-
-
-          with open(
-              temp_file,
-              "wb"
-          ) as f:
-
-              f.write(
-                  response.content
-              )
-
-
-          # =========================================
-          # برش دقیق با مرز تالاب
-          # =========================================
-
-          print(
-              "Clipping image to wetland boundary..."
-          )
-
-
-          image = Image.open(
-              temp_file
-          ).convert("RGBA")
-
-
-          width, height = image.size
-
-
-          # ماسک شفاف
-          mask = Image.new(
-              "L",
-              (width, height),
-              0
-          )
-
-
-          draw = ImageDraw.Draw(
-              mask
-          )
-
-
-          def lon_to_x(lon):
-
-              return int(
-                  (
-                      (lon - minx)
-                      /
-                      (maxx - minx)
-                  )
-                  * (width - 1)
-              )
-
-
-          def lat_to_y(lat):
-
-              return int(
-                  (
-                      (maxy - lat)
-                      /
-                      (maxy - miny)
-                  )
-                  * (height - 1)
-              )
-
-
-          def draw_polygon(poly):
-
-              # قسمت بیرونی
-              exterior = [
-
-                  (
-                      lon_to_x(x),
-                      lat_to_y(y)
-                  )
-
-                  for x, y in
-                  poly.exterior.coords
-
-              ]
-
-              draw.polygon(
-                  exterior,
-                  fill=255
-              )
-
-
-              # سوراخ‌ها
-              for interior in poly.interiors:
-
-                  hole = [
-
-                      (
-                          lon_to_x(x),
-                          lat_to_y(y)
-                      )
-
-                      for x, y in
-                      interior.coords
-
-                  ]
-
-                  draw.polygon(
-                      hole,
-                      fill=0
-                  )
-
-
-          if polygon.geom_type == "Polygon":
-
-              draw_polygon(
-                  polygon
-              )
-
-
-          elif polygon.geom_type == "MultiPolygon":
-
-              for part in polygon.geoms:
-
-                  draw_polygon(
-                      part
-                  )
-
-
-          # اعمال شفافیت
-          image.putalpha(
-              mask
-          )
-
-
-          # ذخیره تصویر نهایی
-          image.save(
-              IMAGE_FILE,
-              "PNG"
-          )
-
-
-          # حذف فایل موقت
-          if os.path.exists(
-              temp_file
-          ):
-
-              os.remove(
-                  temp_file
-              )
-
-
-          # =========================================
-          # ذخیره اطلاعات
-          # =========================================
 
           info = {
 
@@ -559,28 +473,35 @@ jobs:
                   "bbox":
                       bbox,
 
+                  "type":
+                      "Sentinel-2 L2A",
+
                   "max_cloud":
                       20,
 
                   "period_days":
-                      30,
+                      30
 
-                  "type":
-                      "Sentinel-2 L2A",
+              },
 
-                  "bands":
-                      [
-                          "B04",
-                          "B03",
-                          "B02"
-                      ],
+              "ndwi":
+              {
 
-                  "clipped":
-                      True
+                  "file":
+                      "data/maharlo_ndwi.png",
+
+                  "formula":
+                      "(B03 - B08) / (B03 + B08)",
+
+                  "green_band":
+                      "B03",
+
+                  "nir_band":
+                      "B08"
+
               }
 
           }
-
 
           with open(
               INFO_FILE,
@@ -595,17 +516,11 @@ jobs:
                   indent=2
               )
 
-
           print(
-              "Sentinel-2 image clipped successfully."
+              "NDWI CREATED SUCCESSFULLY"
           )
 
           PY
-
-
-      # =========================================
-      # ذخیره فایل‌ها
-      # =========================================
 
       - name: Save files
         run: |
@@ -617,10 +532,11 @@ jobs:
 
           git add \
             data/maharlo_sentinel2.png \
+            data/maharlo_ndwi.png \
             data/wetland-data.json
 
           git diff --cached --quiet || \
             git commit \
-            -m "Clip Sentinel-2 to Maharloo wetland"
+            -m "Add NDWI for Maharloo wetland"
 
           git push
