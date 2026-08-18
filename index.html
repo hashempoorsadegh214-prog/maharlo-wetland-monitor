@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
     <title>سامانه پایش تالاب مهارلو</title>
 
     <link
@@ -18,7 +19,7 @@
         body {
             margin: 0;
             font-family: Tahoma, Arial, sans-serif;
-            background: #f5f7fa;
+            background: #f4f6f8;
         }
 
         header {
@@ -28,13 +29,89 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 22px;
+            font-size: 21px;
             font-weight: bold;
         }
 
         #map {
             width: 100%;
             height: calc(100vh - 60px);
+        }
+
+        .panel {
+            position: absolute;
+            top: 75px;
+            right: 15px;
+            z-index: 1000;
+            width: 330px;
+            max-width: calc(100% - 30px);
+            background: rgba(255, 255, 255, 0.96);
+            border-radius: 12px;
+            box-shadow: 0 3px 15px rgba(0, 0, 0, 0.20);
+            padding: 15px;
+        }
+
+        .panel h3 {
+            margin: 0 0 10px 0;
+            font-size: 18px;
+        }
+
+        .status {
+            font-size: 13px;
+            line-height: 1.8;
+            margin-bottom: 10px;
+        }
+
+        .info {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .info-box {
+            background: #f1f3f5;
+            border-radius: 8px;
+            padding: 8px;
+            font-size: 12px;
+        }
+
+        .info-box strong {
+            display: block;
+            font-size: 14px;
+            margin-top: 3px;
+        }
+
+        .thumb {
+            width: 100%;
+            border-radius: 8px;
+            margin-top: 10px;
+            display: none;
+        }
+
+        .error {
+            color: #b42318;
+        }
+
+        .success {
+            color: #067647;
+        }
+
+        .loading {
+            color: #7a5d00;
+        }
+
+        @media (max-width: 600px) {
+            .panel {
+                top: 70px;
+                right: 10px;
+                left: 10px;
+                width: auto;
+            }
+
+            header {
+                font-size: 17px;
+            }
         }
     </style>
 </head>
@@ -47,48 +124,662 @@
 
 <div id="map"></div>
 
+<div class="panel">
+
+    <h3>پایش Sentinel-2</h3>
+
+    <div id="status" class="status loading">
+        در حال دریافت اطلاعات...
+    </div>
+
+    <div id="info" class="info" style="display:none;">
+
+        <div class="info-box">
+            تاریخ تصویر
+            <strong id="imageDate">---</strong>
+        </div>
+
+        <div class="info-box">
+            پوشش ابر
+            <strong id="cloudCover">---</strong>
+        </div>
+
+        <div class="info-box">
+            ماهواره
+            <strong id="satellite">---</strong>
+        </div>
+
+        <div class="info-box">
+            شناسه تصویر
+            <strong id="productId">---</strong>
+        </div>
+
+    </div>
+
+    <img id="thumbnail" class="thumb" alt="Sentinel-2">
+
+</div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <script>
-    const map = L.map('map').setView([29.43, 52.82], 10);
 
-    L.tileLayer(
-        'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+/* =========================================================
+   تنظیمات
+========================================================= */
+
+const GEOJSON_URL = "bestar_talab_maharlo.geojson";
+
+const STAC_URL =
+    "https://stac.dataspace.copernicus.eu/v1/search";
+
+const MAX_CLOUD = 20;
+
+// بازه جست‌وجو: 30 روز اخیر
+const DAYS_BACK = 30;
+
+
+/* =========================================================
+   ایجاد نقشه
+========================================================= */
+
+const map = L.map("map").setView([29.43, 52.82], 10);
+
+L.tileLayer(
+    "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    {
+        attribution: "&copy; OpenStreetMap contributors"
+    }
+).addTo(map);
+
+
+/* =========================================================
+   عناصر صفحه
+========================================================= */
+
+const statusEl = document.getElementById("status");
+const infoEl = document.getElementById("info");
+
+const imageDateEl = document.getElementById("imageDate");
+const cloudCoverEl = document.getElementById("cloudCover");
+const satelliteEl = document.getElementById("satellite");
+const productIdEl = document.getElementById("productId");
+
+const thumbnailEl = document.getElementById("thumbnail");
+
+
+/* =========================================================
+   توابع کمکی
+========================================================= */
+
+function setStatus(message, type = "") {
+
+    statusEl.textContent = message;
+
+    statusEl.className = "status";
+
+    if (type) {
+        statusEl.classList.add(type);
+    }
+}
+
+
+function formatDate(dateString) {
+
+    if (!dateString) {
+        return "---";
+    }
+
+    const date = new Date(dateString);
+
+    return date.toLocaleString(
+        "fa-IR",
         {
-            attribution: '&copy; OpenStreetMap contributors'
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit"
         }
-    ).addTo(map);
+    );
+}
 
-    fetch('bestar_talab_maharlo.geojson')
-        .then(response => {
-            if (!response.ok) {
-                throw new Error('فایل GeoJSON پیدا نشد');
+
+function getBBox(geometry) {
+
+    let minLon = Infinity;
+    let minLat = Infinity;
+    let maxLon = -Infinity;
+    let maxLat = -Infinity;
+
+    function processCoordinates(coords) {
+
+        if (
+            Array.isArray(coords) &&
+            typeof coords[0] === "number"
+        ) {
+
+            const lon = coords[0];
+            const lat = coords[1];
+
+            minLon = Math.min(minLon, lon);
+            minLat = Math.min(minLat, lat);
+
+            maxLon = Math.max(maxLon, lon);
+            maxLat = Math.max(maxLat, lat);
+
+            return;
+        }
+
+        if (Array.isArray(coords)) {
+
+            for (const item of coords) {
+                processCoordinates(item);
             }
-            return response.json();
-        })
-        .then(data => {
+        }
+    }
 
-            const wetland = L.geoJSON(data, {
-                style: {
-                    color: '#0066ff',
-                    weight: 3,
-                    fillColor: '#00aaff',
-                    fillOpacity: 0.25
+    processCoordinates(geometry.coordinates);
+
+    return [
+        minLon,
+        minLat,
+        maxLon,
+        maxLat
+    ];
+}
+
+
+/* =========================================================
+   لایه تالاب
+========================================================= */
+
+let wetlandLayer = null;
+
+
+/* =========================================================
+   دریافت Sentinel-2
+========================================================= */
+
+async function findSentinelImage(wetlandGeometry) {
+
+    const bbox = getBBox(wetlandGeometry);
+
+    const now = new Date();
+
+    const start = new Date(now);
+
+    start.setDate(
+        start.getDate() - DAYS_BACK
+    );
+
+    const requestBody = {
+
+        collections: [
+            "sentinel-2-l2a"
+        ],
+
+        bbox: bbox,
+
+        datetime:
+            start.toISOString() +
+            "/" +
+            now.toISOString(),
+
+        limit: 50,
+
+        query: {
+
+            "eo:cloud_cover": {
+
+                lte: MAX_CLOUD
+
+            }
+        },
+
+        sortby: [
+
+            {
+                field: "datetime",
+                direction: "desc"
+            }
+
+        ]
+
+    };
+
+
+    const response = await fetch(
+        STAC_URL,
+        {
+            method: "POST",
+
+            headers: {
+
+                "Content-Type":
+                    "application/json"
+
+            },
+
+            body:
+                JSON.stringify(requestBody)
+        }
+    );
+
+
+    if (!response.ok) {
+
+        throw new Error(
+            "خطا در اتصال به Copernicus STAC API: " +
+            response.status
+        );
+    }
+
+
+    const data = await response.json();
+
+
+    if (
+        !data.features ||
+        data.features.length === 0
+    ) {
+
+        throw new Error(
+            "در 30 روز اخیر تصویر Sentinel-2 با ابر کمتر از " +
+            MAX_CLOUD +
+            "% پیدا نشد."
+        );
+    }
+
+
+    return data.features;
+
+}
+
+
+/* =========================================================
+   نمایش نتیجه
+========================================================= */
+
+function showBestImage(features) {
+
+    /*
+       نتیجه‌ها بر اساس تاریخ نزولی آمده‌اند.
+       از بین آنها کمترین ابر را پیدا می‌کنیم.
+       اگر چند تصویر ابر مشابه داشته باشند،
+       جدیدترین تصویر انتخاب می‌شود.
+    */
+
+    const sorted = [...features].sort(
+        (a, b) => {
+
+            const cloudA =
+                Number(
+                    a.properties?.["eo:cloud_cover"] ??
+                    999
+                );
+
+            const cloudB =
+                Number(
+                    b.properties?.["eo:cloud_cover"] ??
+                    999
+                );
+
+            if (cloudA !== cloudB) {
+                return cloudA - cloudB;
+            }
+
+            return new Date(b.datetime) -
+                   new Date(a.datetime);
+
+        }
+    );
+
+
+    const best = sorted[0];
+
+
+    const cloud =
+        Number(
+            best.properties?.["eo:cloud_cover"] ??
+            0
+        );
+
+
+    const satellite =
+        best.properties?.platform ??
+        "Sentinel-2";
+
+
+    imageDateEl.textContent =
+        formatDate(best.datetime);
+
+
+    cloudCoverEl.textContent =
+        cloud.toFixed(1) + "%";
+
+
+    satelliteEl.textContent =
+        satellite;
+
+
+    productIdEl.textContent =
+        best.id;
+
+
+    infoEl.style.display = "grid";
+
+
+    /* --------------------------------------------
+       نمایش footprint تصویر
+    -------------------------------------------- */
+
+    if (best.geometry) {
+
+        const imageFootprint =
+            L.geoJSON(
+                best.geometry,
+                {
+                    style: {
+
+                        color: "#ff3b30",
+
+                        weight: 2,
+
+                        fillOpacity: 0.03,
+
+                        dashArray: "6 5"
+
+                    }
                 }
-            }).addTo(map);
+            ).addTo(map);
 
-            const bounds = wetland.getBounds();
 
-            if (bounds.isValid()) {
-                map.fitBounds(bounds, {
-                    padding: [20, 20]
-                });
+        imageFootprint.bindPopup(
+            `
+            <b>Sentinel-2</b><br>
+            تاریخ: ${formatDate(best.datetime)}<br>
+            ابر: ${cloud.toFixed(1)}%
+            `
+        );
+
+    }
+
+
+    /* --------------------------------------------
+       پیدا کردن thumbnail
+    -------------------------------------------- */
+
+    let thumbnailURL = null;
+
+
+    if (best.assets) {
+
+        if (best.assets.thumbnail) {
+
+            thumbnailURL =
+                best.assets.thumbnail.href;
+
+        }
+
+        else {
+
+            const possibleKeys =
+                Object.keys(best.assets);
+
+            for (
+                const key of possibleKeys
+            ) {
+
+                const asset =
+                    best.assets[key];
+
+                if (
+                    asset &&
+                    asset.href &&
+                    (
+                        asset.type?.includes(
+                            "image/jpeg"
+                        ) ||
+                        asset.type?.includes(
+                            "image/png"
+                        )
+                    )
+                ) {
+
+                    thumbnailURL =
+                        asset.href;
+
+                    break;
+
+                }
+
             }
-        })
-        .catch(error => {
-            console.error(error);
-            alert('خطا در بارگذاری مرز تالاب');
-        });
+
+        }
+
+    }
+
+
+    if (thumbnailURL) {
+
+        thumbnailEl.src =
+            thumbnailURL;
+
+        thumbnailEl.style.display =
+            "block";
+
+
+        thumbnailEl.onerror =
+            function() {
+
+                this.style.display =
+                    "none";
+
+            };
+
+    }
+
+
+    setStatus(
+        "تصویر مناسب Sentinel-2 پیدا شد.",
+        "success"
+    );
+
+
+    /*
+       زوم نقشه روی محدوده تالاب
+    */
+
+    if (wetlandLayer) {
+
+        const bounds =
+            wetlandLayer.getBounds();
+
+        if (bounds.isValid()) {
+
+            map.fitBounds(
+                bounds,
+                {
+                    padding: [
+                        20,
+                        20
+                    ]
+                }
+            );
+
+        }
+
+    }
+
+}
+
+
+/* =========================================================
+   اجرای اصلی
+========================================================= */
+
+async function startMonitoring() {
+
+    try {
+
+        setStatus(
+            "در حال بارگذاری مرز تالاب..."
+        );
+
+
+        const geoResponse =
+            await fetch(
+                GEOJSON_URL
+            );
+
+
+        if (!geoResponse.ok) {
+
+            throw new Error(
+                "فایل GeoJSON تالاب پیدا نشد."
+            );
+
+        }
+
+
+        const geojson =
+            await geoResponse.json();
+
+
+        /*
+           نمایش مرز تالاب
+        */
+
+        wetlandLayer =
+            L.geoJSON(
+                geojson,
+                {
+                    style: {
+
+                        color: "#0066ff",
+
+                        weight: 3,
+
+                        fillColor: "#00aaff",
+
+                        fillOpacity: 0.20
+
+                    }
+                }
+            ).addTo(map);
+
+
+        wetlandLayer.bindPopup(
+            "<b>تالاب مهارلو</b>"
+        );
+
+
+        const bounds =
+            wetlandLayer.getBounds();
+
+
+        if (bounds.isValid()) {
+
+            map.fitBounds(
+                bounds,
+                {
+                    padding: [
+                        20,
+                        20
+                    ]
+                }
+            );
+
+        }
+
+
+        setStatus(
+            "در حال جست‌وجوی Sentinel-2 در Copernicus..."
+        );
+
+
+        /*
+           توجه:
+           اگر GeoJSON شامل MultiPolygon باشد،
+           اولین هندسه معتبر را دریافت می‌کنیم.
+        */
+
+        let geometry = null;
+
+
+        if (geojson.type === "FeatureCollection") {
+
+            if (
+                geojson.features &&
+                geojson.features.length > 0
+            ) {
+
+                geometry =
+                    geojson.features[0].geometry;
+
+            }
+
+        }
+
+        else if (
+            geojson.type === "Feature"
+        ) {
+
+            geometry =
+                geojson.geometry;
+
+        }
+
+        else {
+
+            geometry =
+                geojson;
+
+        }
+
+
+        if (!geometry) {
+
+            throw new Error(
+                "هندسه GeoJSON قابل خواندن نیست."
+            );
+
+        }
+
+
+        const features =
+            await findSentinelImage(
+                geometry
+            );
+
+
+        showBestImage(
+            features
+        );
+
+    }
+
+    catch (error) {
+
+        console.error(error);
+
+        setStatus(
+            error.message,
+            "error"
+        );
+
+    }
+
+}
+
+
+/* =========================================================
+   شروع
+========================================================= */
+
+startMonitoring();
+
 </script>
 
 </body>
