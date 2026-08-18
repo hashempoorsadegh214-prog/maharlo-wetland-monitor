@@ -7,9 +7,11 @@ on:
 
 jobs:
   update-wetland:
+
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Get repository
         uses: actions/checkout@v4
 
@@ -20,15 +22,17 @@ jobs:
 
       - name: Install packages
         run: |
-          pip install requests pillow
+          pip install requests pillow shapely pyproj
 
-      - name: Calculate water area
+      - name: Find image and calculate water area
         env:
           CDSE_CLIENT_ID: ${{ secrets.CDSE_CLIENT_ID }}
           CDSE_CLIENT_SECRET: ${{ secrets.CDSE_CLIENT_SECRET }}
 
         run: |
+
           python - <<'PY'
+
           import json
           import os
           import requests
@@ -36,59 +40,72 @@ jobs:
           from datetime import datetime, timedelta, timezone
           from PIL import Image
 
+          from shapely.geometry import shape, mapping
+          from shapely.ops import transform as shp_transform
+          from pyproj import Transformer
+
+
+          # =====================================================
+          # فایل‌ها
+          # =====================================================
 
           GEOJSON_FILE = "bestar_talab_maharlo.geojson"
+
           RGB_FILE = "data/maharlo_sentinel2.png"
+
           WATER_FILE = "data/maharlo_water.png"
+
           INFO_FILE = "data/wetland-data.json"
 
+
+          # =====================================================
+          # تنظیمات
+          # =====================================================
+
           MAX_CLOUD = 20
+
           DAYS_BACK = 30
 
-          # فعلاً برای محاسبه اولیه
           PIXEL_SIZE_M = 20
-          PIXEL_AREA_M2 = PIXEL_SIZE_M * PIXEL_SIZE_M
-          PIXEL_AREA_HA = PIXEL_AREA_M2 / 10000.0
+
+          PIXEL_AREA_M2 = 400
+
+          PIXEL_AREA_HA = 0.04
 
 
-          # ==========================================
+          # =====================================================
           # خواندن مرز تالاب
-          # ==========================================
+          # =====================================================
 
-          with open(GEOJSON_FILE, "r", encoding="utf-8") as f:
+          with open(
+              GEOJSON_FILE,
+              "r",
+              encoding="utf-8"
+          ) as f:
+
               geojson = json.load(f)
+
 
           geometry = geojson["features"][0]["geometry"]
 
+          wetland = shape(geometry).buffer(0)
 
-          # ==========================================
-          # پیدا کردن BBOX
-          # ==========================================
 
-          points = []
+          if wetland.is_empty:
 
-          def collect_points(obj):
-              if (
-                  isinstance(obj, list)
-                  and len(obj) >= 2
-                  and isinstance(obj[0], (int, float))
-                  and isinstance(obj[1], (int, float))
-              ):
-                  points.append((obj[0], obj[1]))
+              raise Exception(
+                  "مرز تالاب معتبر نیست."
+              )
 
-              elif isinstance(obj, list):
-                  for item in obj:
-                      collect_points(item)
 
-          collect_points(geometry["coordinates"])
+          # =====================================================
+          # BBOX جغرافیایی
+          # =====================================================
 
-          if not points:
-              raise Exception("هیچ مختصاتی از مرز تالاب پیدا نشد.")
+          min_lon, min_lat, max_lon, max_lat = (
+              wetland.bounds
+          )
 
-          min_lon = min(p[0] for p in points)
-          max_lon = max(p[0] for p in points)
-          min_lat = min(p[1] for p in points)
-          max_lat = max(p[1] for p in points)
 
           bbox = [
               min_lon,
@@ -97,294 +114,751 @@ jobs:
               max_lat
           ]
 
-          print("Wetland BBOX:")
-          print(bbox)
+
+          print(
+              "Wetland BBOX:",
+              bbox
+          )
 
 
-          # ==========================================
-          # دریافت توکن Copernicus
-          # ==========================================
+          # =====================================================
+          # پیدا کردن تصویر Sentinel-2
+          # =====================================================
+
+          stac_url = (
+              "https://stac.dataspace.copernicus.eu/"
+              "v1/search"
+          )
+
+
+          now = datetime.now(
+              timezone.utc
+          )
+
+          start = (
+              now -
+              timedelta(
+                  days=DAYS_BACK
+              )
+          )
+
+
+          stac_request = {
+
+              "collections": [
+                  "sentinel-2-l2a"
+              ],
+
+              "datetime":
+                  start.isoformat()
+                  + "/"
+                  + now.isoformat(),
+
+              "intersects":
+                  mapping(wetland),
+
+              "query": {
+
+                  "eo:cloud_cover": {
+
+                      "lte":
+                          MAX_CLOUD
+
+                  }
+
+              },
+
+              "sortby": [
+
+                  {
+
+                      "field":
+                          "properties.datetime",
+
+                      "direction":
+                          "desc"
+
+                  }
+
+              ],
+
+              "limit":
+                  20
+
+          }
+
+
+          print(
+              "Searching Sentinel-2..."
+          )
+
+
+          stac_response = requests.post(
+
+              stac_url,
+
+              json=stac_request,
+
+              timeout=120
+
+          )
+
+
+          if stac_response.status_code != 200:
+
+              print(
+                  stac_response.text[:3000]
+              )
+
+              raise Exception(
+                  "Sentinel-2 search failed"
+              )
+
+
+          features = (
+              stac_response
+              .json()
+              .get("features", [])
+          )
+
+
+          if not features:
+
+              raise Exception(
+                  "هیچ تصویر Sentinel-2 با ابر کمتر از 20 درصد پیدا نشد."
+              )
+
+
+          selected = features[0]
+
+
+          image_date = (
+              selected
+              .get("properties", {})
+              .get("datetime")
+          )
+
+
+          image_id = selected.get(
+              "id"
+          )
+
+
+          cloud_cover = (
+              selected
+              .get("properties", {})
+              .get("eo:cloud_cover")
+          )
+
+
+          if not image_date:
+
+              raise Exception(
+                  "تاریخ تصویر پیدا نشد."
+              )
+
+
+          print(
+              "Selected image:",
+              image_id
+          )
+
+          print(
+              "Acquisition date:",
+              image_date
+          )
+
+          print(
+              "Cloud cover:",
+              cloud_cover
+          )
+
+
+          # =====================================================
+          # محدوده دقیق همان روز
+          # =====================================================
+
+          acquisition_day = (
+              image_date[0:10]
+          )
+
+
+          day_start = (
+              acquisition_day +
+              "T00:00:00Z"
+          )
+
+
+          day_end = (
+              acquisition_day +
+              "T23:59:59Z"
+          )
+
+
+          # =====================================================
+          # دریافت Access Token
+          # =====================================================
 
           token_url = (
               "https://identity.dataspace.copernicus.eu/"
               "auth/realms/CDSE/protocol/openid-connect/token"
           )
 
+
           token_response = requests.post(
+
               token_url,
+
               data={
-                  "grant_type": "client_credentials",
-                  "client_id": os.environ["CDSE_CLIENT_ID"],
-                  "client_secret": os.environ["CDSE_CLIENT_SECRET"]
+
+                  "grant_type":
+                      "client_credentials",
+
+                  "client_id":
+                      os.environ[
+                          "CDSE_CLIENT_ID"
+                      ],
+
+                  "client_secret":
+                      os.environ[
+                          "CDSE_CLIENT_SECRET"
+                      ]
+
               },
+
               timeout=60
+
           )
+
 
           if token_response.status_code != 200:
-              print(token_response.text)
-              raise Exception("Copernicus authentication failed")
 
-          access_token = token_response.json()["access_token"]
+              print(
+                  token_response.text
+              )
 
-          print("Copernicus authentication OK")
-
-
-          # ==========================================
-          # زمان
-          # ==========================================
-
-          now = datetime.now(timezone.utc)
-
-          start = now - timedelta(days=DAYS_BACK)
+              raise Exception(
+                  "Copernicus authentication failed"
+              )
 
 
-          # ==========================================
-          # آدرس Process API
-          # ==========================================
-
-          process_url = (
-              "https://sh.dataspace.copernicus.eu/process/v1"
+          access_token = (
+              token_response
+              .json()
+              ["access_token"]
           )
 
+
+          # =====================================================
+          # Process API
+          # =====================================================
+
+          process_url = (
+              "https://sh.dataspace.copernicus.eu/"
+              "process/v1"
+          )
+
+
           headers = {
-              "Authorization": "Bearer " + access_token,
-              "Content-Type": "application/json"
+
+              "Authorization":
+                  "Bearer "
+                  + access_token,
+
+              "Content-Type":
+                  "application/json"
+
           }
 
 
-          # ==========================================
-          # تصویر RGB
-          # ==========================================
+          # =====================================================
+          # RGB
+          # =====================================================
 
           rgb_evalscript = """
+
           //VERSION=3
 
           function setup() {
+
               return {
+
                   input: [
                       "B02",
                       "B03",
                       "B04"
                   ],
+
                   output: {
+
                       bands: 3,
-                      sampleType: "AUTO"
+
+                      sampleType:
+                          "AUTO"
+
                   }
+
               };
+
           }
 
           function evaluatePixel(sample) {
+
               return [
+
                   2.5 * sample.B04,
+
                   2.5 * sample.B03,
+
                   2.5 * sample.B02
+
               ];
+
           }
+
           """
 
+
           rgb_request = {
+
               "input": {
+
                   "bounds": {
+
                       "properties": {
+
                           "crs":
                           "http://www.opengis.net/def/crs/OGC/1.3/CRS84"
+
                       },
-                      "bbox": bbox
+
+                      "bbox":
+                          bbox
+
                   },
+
                   "data": [
+
                       {
-                          "type": "sentinel-2-l2a",
+
+                          "type":
+                              "sentinel-2-l2a",
+
                           "dataFilter": {
+
                               "timeRange": {
-                                  "from": start.isoformat(),
-                                  "to": now.isoformat()
+
+                                  "from":
+                                      day_start,
+
+                                  "to":
+                                      day_end
+
                               },
-                              "maxCloudCoverage": MAX_CLOUD,
-                              "mosaickingOrder": "leastCC"
+
+                              "mosaickingOrder":
+                                  "mostRecent"
+
                           }
+
                       }
+
                   ]
+
               },
+
               "output": {
-                  "width": 1200,
-                  "height": 1200,
+
+                  "width":
+                      1200,
+
+                  "height":
+                      1200,
+
                   "responses": [
+
                       {
-                          "identifier": "default",
+
+                          "identifier":
+                              "default",
+
                           "format": {
-                              "type": "image/png"
+
+                              "type":
+                                  "image/png"
+
                           }
+
                       }
+
                   ]
+
               },
-              "evalscript": rgb_evalscript
+
+              "evalscript":
+                  rgb_evalscript
+
           }
 
-          print("Downloading RGB...")
 
           rgb_response = requests.post(
+
               process_url,
+
               headers=headers,
+
               json=rgb_request,
+
               timeout=300
+
           )
 
-          print("RGB HTTP:", rgb_response.status_code)
 
           if rgb_response.status_code != 200:
-              print(rgb_response.text[:3000])
-              raise Exception("RGB request failed")
 
-          os.makedirs("data", exist_ok=True)
+              print(
+                  rgb_response.text[:3000]
+              )
 
-          with open(RGB_FILE, "wb") as f:
-              f.write(rgb_response.content)
+              raise Exception(
+                  "RGB request failed"
+              )
 
-          print("RGB saved.")
+
+          os.makedirs(
+              "data",
+              exist_ok=True
+          )
 
 
-          # ==========================================
+          with open(
+              RGB_FILE,
+              "wb"
+          ) as f:
+
+              f.write(
+                  rgb_response.content
+              )
+
+
+          print(
+              "RGB saved."
+          )
+
+
+          # =====================================================
+          # تبدیل محدوده تالاب به UTM Zone 39N
+          # =====================================================
+
+          to_utm = Transformer.from_crs(
+              "EPSG:4326",
+              "EPSG:32639",
+              always_xy=True
+          ).transform
+
+
+          wetland_utm = shp_transform(
+              to_utm,
+              wetland
+          )
+
+
+          min_x, min_y, max_x, max_y = (
+              wetland_utm.bounds
+          )
+
+
+          width_m = max_x - min_x
+
+          height_m = max_y - min_y
+
+
+          width_px = int(
+              round(
+                  width_m /
+                  PIXEL_SIZE_M
+              )
+          )
+
+
+          height_px = int(
+              round(
+                  height_m /
+                  PIXEL_SIZE_M
+              )
+          )
+
+
+          print(
+              "Water grid:",
+              width_px,
+              "x",
+              height_px
+          )
+
+
+          # =====================================================
           # MNDWI + AWEI
-          # ==========================================
+          # =====================================================
 
           water_evalscript = """
+
           //VERSION=3
 
           function setup() {
+
               return {
+
                   input: [
+
                       "B03",
                       "B08",
                       "B11",
                       "B12"
+
                   ],
+
                   output: {
+
                       bands: 4,
-                      sampleType: "AUTO"
+
+                      sampleType:
+                          "AUTO"
+
                   }
+
               };
+
           }
+
 
           function evaluatePixel(sample) {
 
               let mndwi =
-                  (sample.B03 - sample.B11) /
-                  (sample.B03 + sample.B11);
+                  (
+                      sample.B03 -
+                      sample.B11
+                  )
+                  /
+                  (
+                      sample.B03 +
+                      sample.B11
+                  );
+
 
               let awei =
-                  4 * (sample.B03 - sample.B11) -
+                  4 *
                   (
-                      0.25 * sample.B08 +
-                      2.75 * sample.B12
+                      sample.B03 -
+                      sample.B11
+                  )
+                  -
+                  (
+                      0.25 *
+                      sample.B08
+                      +
+                      2.75 *
+                      sample.B12
                   );
+
 
               if (
                   awei > -0.1 &&
                   mndwi > 0
               ) {
+
                   return [
+
                       0.0,
                       0.25,
                       1.0,
                       1.0
+
                   ];
+
               }
 
+
               return [
+
                   0.0,
                   0.0,
                   0.0,
                   0.0
+
               ];
+
           }
+
           """
 
+
           water_request = {
+
               "input": {
+
                   "bounds": {
+
                       "properties": {
+
                           "crs":
-                          "http://www.opengis.net/def/crs/OGC/1.3/CRS84"
+                          "http://www.opengis.net/def/crs/EPSG/0/32639"
+
                       },
-                      "bbox": bbox
+
+                      "bbox": [
+
+                          min_x,
+                          min_y,
+                          max_x,
+                          max_y
+
+                      ]
+
                   },
+
                   "data": [
+
                       {
-                          "type": "sentinel-2-l2a",
+
+                          "type":
+                              "sentinel-2-l2a",
+
                           "dataFilter": {
+
                               "timeRange": {
-                                  "from": start.isoformat(),
-                                  "to": now.isoformat()
+
+                                  "from":
+                                      day_start,
+
+                                  "to":
+                                      day_end
+
                               },
-                              "maxCloudCoverage": MAX_CLOUD,
-                              "mosaickingOrder": "leastCC"
+
+                              "mosaickingOrder":
+                                  "mostRecent"
+
                           }
+
                       }
+
                   ]
+
               },
+
               "output": {
-                  "width": 1200,
-                  "height": 1200,
+
+                  "width":
+                      width_px,
+
+                  "height":
+                      height_px,
+
                   "responses": [
+
                       {
-                          "identifier": "default",
+
+                          "identifier":
+                              "default",
+
                           "format": {
-                              "type": "image/png"
+
+                              "type":
+                                  "image/png"
+
                           }
+
                       }
+
                   ]
+
               },
-              "evalscript": water_evalscript
+
+              "evalscript":
+                  water_evalscript
+
           }
 
-          print("Calculating MNDWI + AWEI...")
 
-          water_response = requests.post(
-              process_url,
-              headers=headers,
-              json=water_request,
-              timeout=300
+          print(
+              "Calculating water..."
           )
 
-          print("Water HTTP:", water_response.status_code)
+
+          water_response = requests.post(
+
+              process_url,
+
+              headers=headers,
+
+              json=water_request,
+
+              timeout=300
+
+          )
+
 
           if water_response.status_code != 200:
-              print(water_response.text[:3000])
-              raise Exception("Water request failed")
 
-          with open(WATER_FILE, "wb") as f:
-              f.write(water_response.content)
+              print(
+                  water_response.text[:3000]
+              )
 
-          print("Water image saved.")
+              raise Exception(
+                  "Water request failed"
+              )
 
 
-          # ==========================================
+          with open(
+              WATER_FILE,
+              "wb"
+          ) as f:
+
+              f.write(
+                  water_response.content
+              )
+
+
+          # =====================================================
           # شمارش پیکسل‌های آب
-          # ==========================================
+          # =====================================================
 
-          image = Image.open(WATER_FILE).convert("RGBA")
+          water_image = Image.open(
+              WATER_FILE
+          ).convert("RGBA")
+
+
+          pixels = water_image.load()
+
 
           water_pixels = 0
-          total_pixels = image.width * image.height
 
-          pixels = image.load()
 
-          for y in range(image.height):
-              for x in range(image.width):
+          for y in range(
+              water_image.height
+          ):
+
+              for x in range(
+                  water_image.width
+              ):
+
                   alpha = pixels[x, y][3]
 
                   if alpha > 0:
+
                       water_pixels += 1
 
 
-          # ==========================================
-          # محاسبه مساحت
-          # ==========================================
+          # =====================================================
+          # مساحت
+          # =====================================================
 
           water_area_m2 = (
               water_pixels *
               PIXEL_AREA_M2
           )
+
 
           water_area_ha = (
               water_area_m2 /
@@ -392,36 +866,44 @@ jobs:
           )
 
 
-          print("--------------------------------")
-          print("Total pixels:", total_pixels)
-          print("Water pixels:", water_pixels)
-          print("Pixel area:", PIXEL_AREA_M2, "m2")
-          print("Water area:", round(water_area_ha, 2), "ha")
-          print("--------------------------------")
-
-
-          # ==========================================
-          # ذخیره JSON
-          # ==========================================
+          # =====================================================
+          # ذخیره اطلاعات
+          # =====================================================
 
           info = {
+
               "updated_at":
-                  datetime.now(timezone.utc).isoformat(),
+                  datetime.now(
+                      timezone.utc
+                  ).isoformat(),
 
               "image": {
+
+                  "id":
+                      image_id,
+
+                  "date":
+                      image_date,
+
+                  "date_only":
+                      acquisition_day,
+
+                  "cloud_cover":
+                      cloud_cover,
+
                   "file":
                       "data/maharlo_sentinel2.png",
+
                   "bbox":
                       bbox,
+
                   "type":
-                      "Sentinel-2 L2A",
-                  "max_cloud":
-                      MAX_CLOUD,
-                  "period_days":
-                      DAYS_BACK
+                      "Sentinel-2 L2A"
+
               },
 
               "water": {
+
                   "file":
                       "data/maharlo_water.png",
 
@@ -429,10 +911,10 @@ jobs:
                       "MNDWI + AWEI",
 
                   "mndwi":
-                      "(B03 - B11) / (B03 + B11)",
+                      "(B03-B11)/(B03+B11)",
 
                   "awei":
-                      "4*(B03-B11) - (0.25*B08 + 2.75*B12)",
+                      "4*(B03-B11)-(0.25*B08+2.75*B12)",
 
                   "condition":
                       "AWEI > -0.1 AND MNDWI > 0",
@@ -443,9 +925,6 @@ jobs:
                   "pixel_area_m2":
                       PIXEL_AREA_M2,
 
-                  "pixel_area_ha":
-                      PIXEL_AREA_HA,
-
                   "water_pixels":
                       water_pixels,
 
@@ -453,11 +932,22 @@ jobs:
                       water_area_m2,
 
                   "water_area_ha":
-                      round(water_area_ha, 2)
+                      round(
+                          water_area_ha,
+                          2
+                      )
+
               }
+
           }
 
-          with open(INFO_FILE, "w", encoding="utf-8") as f:
+
+          with open(
+              INFO_FILE,
+              "w",
+              encoding="utf-8"
+          ) as f:
+
               json.dump(
                   info,
                   f,
@@ -465,17 +955,44 @@ jobs:
                   indent=2
               )
 
+
           print("")
-          print("================================")
-          print("WATER AREA CALCULATED")
-          print("Area:", round(water_area_ha, 2), "ha")
-          print("================================")
+          print(
+              "===================================="
+          )
+
+          print(
+              "IMAGE DATE:",
+              acquisition_day
+          )
+
+          print(
+              "CLOUD:",
+              cloud_cover
+          )
+
+          print(
+              "WATER AREA:",
+              round(
+                  water_area_ha,
+                  2
+              ),
+              "ha"
+          )
+
+          print(
+              "===================================="
+
+          )
 
           PY
 
+
       - name: Save files
         run: |
+
           git config user.name "github-actions"
+
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add \
@@ -485,6 +1002,6 @@ jobs:
 
           git diff --cached --quiet || \
             git commit \
-            -m "Calculate Maharloo water area"
+            -m "Update wetland water date and area"
 
           git push
