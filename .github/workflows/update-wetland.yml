@@ -1,4 +1,4 @@
-name: Update Maharloo Wetland
+name: Update Maharloo Wetland Archive
 
 on:
   workflow_dispatch:
@@ -7,7 +7,6 @@ on:
 
 jobs:
   update-wetland:
-
     runs-on: ubuntu-latest
 
     steps:
@@ -22,9 +21,9 @@ jobs:
 
       - name: Install packages
         run: |
-          pip install requests pillow shapely pyproj
+          pip install requests pillow shapely rasterio numpy pyproj
 
-      - name: Find image and calculate water area
+      - name: Build 30 day archive
         env:
           CDSE_CLIENT_ID: ${{ secrets.CDSE_CLIENT_ID }}
           CDSE_CLIENT_SECRET: ${{ secrets.CDSE_CLIENT_SECRET }}
@@ -35,42 +34,63 @@ jobs:
 
           import json
           import os
+          import shutil
           import requests
 
           from datetime import datetime, timedelta, timezone
+
+          import numpy as np
+
           from PIL import Image
 
           from shapely.geometry import shape, mapping
           from shapely.ops import transform as shp_transform
+
           from pyproj import Transformer
 
-
-          # =====================================================
-          # فایل‌ها
-          # =====================================================
-
-          GEOJSON_FILE = "bestar_talab_maharlo.geojson"
-
-          RGB_FILE = "data/maharlo_sentinel2.png"
-
-          WATER_FILE = "data/maharlo_water.png"
-
-          INFO_FILE = "data/wetland-data.json"
+          import rasterio
+          from rasterio.transform import from_bounds
+          from rasterio.features import geometry_mask
 
 
           # =====================================================
           # تنظیمات
           # =====================================================
 
+          GEOJSON_FILE = "bestar_talab_maharlo.geojson"
+
+          ARCHIVE_DIR = "data/archive"
+
+          ARCHIVE_JSON = "data/archive.json"
+
           MAX_CLOUD = 20
 
           DAYS_BACK = 30
 
-          PIXEL_SIZE_M = 20
+          WATER_PIXEL_SIZE = 20
 
-          PIXEL_AREA_M2 = 400
 
-          PIXEL_AREA_HA = 0.04
+          # =====================================================
+          # پاک کردن آرشیو قدیمی
+          # =====================================================
+
+          os.makedirs(
+              ARCHIVE_DIR,
+              exist_ok=True
+          )
+
+
+          # فایل‌های قبلی آرشیو را پاک می‌کنیم
+          for name in os.listdir(ARCHIVE_DIR):
+
+              path = os.path.join(
+                  ARCHIVE_DIR,
+                  name
+              )
+
+              if os.path.isfile(path):
+
+                  os.remove(path)
 
 
           # =====================================================
@@ -86,9 +106,19 @@ jobs:
               geojson = json.load(f)
 
 
+          if not geojson.get("features"):
+
+              raise Exception(
+                  "فایل GeoJSON فاقد Feature است."
+              )
+
+
           geometry = geojson["features"][0]["geometry"]
 
-          wetland = shape(geometry).buffer(0)
+
+          wetland = shape(
+              geometry
+          ).buffer(0)
 
 
           if wetland.is_empty:
@@ -99,7 +129,7 @@ jobs:
 
 
           # =====================================================
-          # BBOX جغرافیایی
+          # BBOX تالاب
           # =====================================================
 
           min_lon, min_lat, max_lon, max_lat = (
@@ -122,181 +152,7 @@ jobs:
 
 
           # =====================================================
-          # پیدا کردن تصویر Sentinel-2
-          # =====================================================
-
-          stac_url = (
-              "https://stac.dataspace.copernicus.eu/"
-              "v1/search"
-          )
-
-
-          now = datetime.now(
-              timezone.utc
-          )
-
-          start = (
-              now -
-              timedelta(
-                  days=DAYS_BACK
-              )
-          )
-
-
-          stac_request = {
-
-              "collections": [
-                  "sentinel-2-l2a"
-              ],
-
-              "datetime":
-                  start.isoformat()
-                  + "/"
-                  + now.isoformat(),
-
-              "intersects":
-                  mapping(wetland),
-
-              "query": {
-
-                  "eo:cloud_cover": {
-
-                      "lte":
-                          MAX_CLOUD
-
-                  }
-
-              },
-
-              "sortby": [
-
-                  {
-
-                      "field":
-                          "properties.datetime",
-
-                      "direction":
-                          "desc"
-
-                  }
-
-              ],
-
-              "limit":
-                  20
-
-          }
-
-
-          print(
-              "Searching Sentinel-2..."
-          )
-
-
-          stac_response = requests.post(
-
-              stac_url,
-
-              json=stac_request,
-
-              timeout=120
-
-          )
-
-
-          if stac_response.status_code != 200:
-
-              print(
-                  stac_response.text[:3000]
-              )
-
-              raise Exception(
-                  "Sentinel-2 search failed"
-              )
-
-
-          features = (
-              stac_response
-              .json()
-              .get("features", [])
-          )
-
-
-          if not features:
-
-              raise Exception(
-                  "هیچ تصویر Sentinel-2 با ابر کمتر از 20 درصد پیدا نشد."
-              )
-
-
-          selected = features[0]
-
-
-          image_date = (
-              selected
-              .get("properties", {})
-              .get("datetime")
-          )
-
-
-          image_id = selected.get(
-              "id"
-          )
-
-
-          cloud_cover = (
-              selected
-              .get("properties", {})
-              .get("eo:cloud_cover")
-          )
-
-
-          if not image_date:
-
-              raise Exception(
-                  "تاریخ تصویر پیدا نشد."
-              )
-
-
-          print(
-              "Selected image:",
-              image_id
-          )
-
-          print(
-              "Acquisition date:",
-              image_date
-          )
-
-          print(
-              "Cloud cover:",
-              cloud_cover
-          )
-
-
-          # =====================================================
-          # محدوده دقیق همان روز
-          # =====================================================
-
-          acquisition_day = (
-              image_date[0:10]
-          )
-
-
-          day_start = (
-              acquisition_day +
-              "T00:00:00Z"
-          )
-
-
-          day_end = (
-              acquisition_day +
-              "T23:59:59Z"
-          )
-
-
-          # =====================================================
-          # دریافت Access Token
+          # ورود به Copernicus
           # =====================================================
 
           token_url = (
@@ -338,7 +194,7 @@ jobs:
               )
 
               raise Exception(
-                  "Copernicus authentication failed"
+                  "Copernicus authentication failed."
               )
 
 
@@ -349,21 +205,11 @@ jobs:
           )
 
 
-          # =====================================================
-          # Process API
-          # =====================================================
-
-          process_url = (
-              "https://sh.dataspace.copernicus.eu/"
-              "process/v1"
-          )
-
-
           headers = {
 
               "Authorization":
-                  "Bearer "
-                  + access_token,
+                  "Bearer " +
+                  access_token,
 
               "Content-Type":
                   "application/json"
@@ -371,8 +217,270 @@ jobs:
           }
 
 
+          print(
+              "Copernicus authentication OK"
+          )
+
+
           # =====================================================
-          # RGB
+          # پیدا کردن تصاویر ۳۰ روز گذشته
+          # =====================================================
+
+          now = datetime.now(
+              timezone.utc
+          )
+
+
+          start = (
+              now -
+              timedelta(
+                  days=DAYS_BACK
+              )
+          )
+
+
+          stac_url = (
+              "https://stac.dataspace.copernicus.eu/"
+              "v1/search"
+          )
+
+
+          stac_request = {
+
+              "collections": [
+
+                  "sentinel-2-l2a"
+
+              ],
+
+              "datetime":
+
+                  start.isoformat()
+                  + "/"
+                  + now.isoformat(),
+
+              "intersects":
+
+                  mapping(
+                      wetland
+                  ),
+
+              "query": {
+
+                  "eo:cloud_cover": {
+
+                      "lte":
+                          MAX_CLOUD
+
+                  }
+
+              },
+
+              "sortby": [
+
+                  {
+
+                      "field":
+                          "properties.datetime",
+
+                      "direction":
+                          "desc"
+
+                  }
+
+              ],
+
+              "limit":
+                  100
+
+          }
+
+
+          print(
+              "Searching 30 days..."
+          )
+
+
+          stac_response = requests.post(
+
+              stac_url,
+
+              json=stac_request,
+
+              timeout=120
+
+          )
+
+
+          if stac_response.status_code != 200:
+
+              print(
+                  stac_response.text[:3000]
+              )
+
+              raise Exception(
+                  "STAC search failed."
+              )
+
+
+          features = (
+              stac_response
+              .json()
+              .get(
+                  "features",
+                  []
+              )
+          )
+
+
+          print(
+              "STAC results:",
+              len(features)
+          )
+
+
+          if not features:
+
+              raise Exception(
+                  "در ۳۰ روز گذشته تصویر مناسب پیدا نشد."
+              )
+
+
+          # =====================================================
+          # فقط یک تصویر برای هر روز
+          # اگر یک روز چند تصویر بود،
+          # کم‌ابرترین انتخاب می‌شود.
+          # =====================================================
+
+          by_day = {}
+
+
+          for feature in features:
+
+              props = feature.get(
+                  "properties",
+                  {}
+              )
+
+
+              dt = props.get(
+                  "datetime"
+              )
+
+
+              if not dt:
+
+                  continue
+
+
+              day = dt[:10]
+
+
+              cloud = props.get(
+                  "eo:cloud_cover"
+              )
+
+
+              try:
+
+                  cloud_value = float(
+                      cloud
+                  )
+
+              except:
+
+                  cloud_value = 999
+
+
+              item = {
+
+                  "id":
+                      feature.get(
+                          "id"
+                      ),
+
+                  "datetime":
+                      dt,
+
+                  "date":
+                      day,
+
+                  "cloud_cover":
+                      cloud_value
+
+              }
+
+
+              if (
+                  day not in by_day
+                  or
+                  cloud_value <
+                  by_day[day]["cloud_cover"]
+              ):
+
+                  by_day[day] = item
+
+
+          selected_days = sorted(
+
+              by_day.values(),
+
+              key=lambda x:
+                  x["date"],
+
+              reverse=True
+
+          )
+
+
+          print(
+              "Available image days:",
+              len(selected_days)
+          )
+
+
+          # =====================================================
+          # UTM منطقه مهارلو
+          # =====================================================
+
+          to_utm = Transformer.from_crs(
+
+              "EPSG:4326",
+
+              "EPSG:32639",
+
+              always_xy=True
+
+          ).transform
+
+
+          from_utm = Transformer.from_crs(
+
+              "EPSG:32639",
+
+              "EPSG:4326",
+
+              always_xy=True
+
+          ).transform
+
+
+          wetland_utm = shp_transform(
+
+              to_utm,
+
+              wetland
+
+          )
+
+
+          utm_min_x, utm_min_y, utm_max_x, utm_max_y = (
+              wetland_utm.bounds
+          )
+
+
+          # =====================================================
+          # Evalscript تصویر RGB
           # =====================================================
 
           rgb_evalscript = """
@@ -419,185 +527,9 @@ jobs:
           """
 
 
-          rgb_request = {
-
-              "input": {
-
-                  "bounds": {
-
-                      "properties": {
-
-                          "crs":
-                          "http://www.opengis.net/def/crs/OGC/1.3/CRS84"
-
-                      },
-
-                      "bbox":
-                          bbox
-
-                  },
-
-                  "data": [
-
-                      {
-
-                          "type":
-                              "sentinel-2-l2a",
-
-                          "dataFilter": {
-
-                              "timeRange": {
-
-                                  "from":
-                                      day_start,
-
-                                  "to":
-                                      day_end
-
-                              },
-
-                              "mosaickingOrder":
-                                  "mostRecent"
-
-                          }
-
-                      }
-
-                  ]
-
-              },
-
-              "output": {
-
-                  "width":
-                      1200,
-
-                  "height":
-                      1200,
-
-                  "responses": [
-
-                      {
-
-                          "identifier":
-                              "default",
-
-                          "format": {
-
-                              "type":
-                                  "image/png"
-
-                          }
-
-                      }
-
-                  ]
-
-              },
-
-              "evalscript":
-                  rgb_evalscript
-
-          }
-
-
-          rgb_response = requests.post(
-
-              process_url,
-
-              headers=headers,
-
-              json=rgb_request,
-
-              timeout=300
-
-          )
-
-
-          if rgb_response.status_code != 200:
-
-              print(
-                  rgb_response.text[:3000]
-              )
-
-              raise Exception(
-                  "RGB request failed"
-              )
-
-
-          os.makedirs(
-              "data",
-              exist_ok=True
-          )
-
-
-          with open(
-              RGB_FILE,
-              "wb"
-          ) as f:
-
-              f.write(
-                  rgb_response.content
-              )
-
-
-          print(
-              "RGB saved."
-          )
-
-
           # =====================================================
-          # تبدیل محدوده تالاب به UTM Zone 39N
-          # =====================================================
-
-          to_utm = Transformer.from_crs(
-              "EPSG:4326",
-              "EPSG:32639",
-              always_xy=True
-          ).transform
-
-
-          wetland_utm = shp_transform(
-              to_utm,
-              wetland
-          )
-
-
-          min_x, min_y, max_x, max_y = (
-              wetland_utm.bounds
-          )
-
-
-          width_m = max_x - min_x
-
-          height_m = max_y - min_y
-
-
-          width_px = int(
-              round(
-                  width_m /
-                  PIXEL_SIZE_M
-              )
-          )
-
-
-          height_px = int(
-              round(
-                  height_m /
-                  PIXEL_SIZE_M
-              )
-          )
-
-
-          print(
-              "Water grid:",
-              width_px,
-              "x",
-              height_px
-          )
-
-
-          # =====================================================
+          # Evalscript آب
+          # فرمول کاربر:
           # MNDWI + AWEI
           # =====================================================
 
@@ -620,10 +552,10 @@ jobs:
 
                   output: {
 
-                      bands: 4,
+                      bands: 1,
 
                       sampleType:
-                          "AUTO"
+                          "UINT8"
 
                   }
 
@@ -635,11 +567,14 @@ jobs:
           function evaluatePixel(sample) {
 
               let mndwi =
+
                   (
                       sample.B03 -
                       sample.B11
                   )
+
                   /
+
                   (
                       sample.B03 +
                       sample.B11
@@ -647,289 +582,545 @@ jobs:
 
 
               let awei =
+
                   4 *
+
                   (
                       sample.B03 -
                       sample.B11
                   )
+
                   -
+
                   (
                       0.25 *
                       sample.B08
+
                       +
+
                       2.75 *
                       sample.B12
                   );
 
 
               if (
-                  awei > -0.1 &&
+
+                  awei > -0.1
+
+                  &&
+
                   mndwi > 0
+
               ) {
 
-                  return [
-
-                      0.0,
-                      0.25,
-                      1.0,
-                      1.0
-
-                  ];
+                  return [1];
 
               }
 
 
-              return [
-
-                  0.0,
-                  0.0,
-                  0.0,
-                  0.0
-
-              ];
+              return [0];
 
           }
 
           """
 
 
-          water_request = {
+          # =====================================================
+          # پردازش هر روز
+          # =====================================================
 
-              "input": {
+          archive_items = []
 
-                  "bounds": {
 
-                      "properties": {
+          for index, item in enumerate(
+              selected_days,
+              start=1
+          ):
 
-                          "crs":
-                          "http://www.opengis.net/def/crs/EPSG/0/32639"
+              day = item["date"]
+
+              cloud = item["cloud_cover"]
+
+              day_start = (
+                  day +
+                  "T00:00:00Z"
+              )
+
+              day_end = (
+                  day +
+                  "T23:59:59Z"
+              )
+
+
+              print("")
+              print(
+                  "====================================="
+              )
+
+              print(
+                  f"{index}/{len(selected_days)}"
+              )
+
+              print(
+                  "Date:",
+                  day
+              )
+
+              print(
+                  "Cloud:",
+                  cloud
+              )
+
+              print(
+                  "====================================="
+              )
+
+
+              # =================================================
+              # نام فایل‌ها
+              # =================================================
+
+              rgb_file = os.path.join(
+
+                  ARCHIVE_DIR,
+
+                  f"rgb_{day}.png"
+
+              )
+
+
+              water_file = os.path.join(
+
+                  ARCHIVE_DIR,
+
+                  f"water_{day}.png"
+
+              )
+
+
+              tiff_file = os.path.join(
+
+                  ARCHIVE_DIR,
+
+                  f"water_{day}.tif"
+
+              )
+
+
+              # =================================================
+              # RGB
+              # =================================================
+
+              rgb_request = {
+
+                  "input": {
+
+                      "bounds": {
+
+                          "properties": {
+
+                              "crs":
+                              "http://www.opengis.net/def/crs/OGC/1.3/CRS84"
+
+                          },
+
+                          "bbox":
+                              bbox
 
                       },
 
-                      "bbox": [
+                      "data": [
 
-                          min_x,
-                          min_y,
-                          max_x,
-                          max_y
+                          {
+
+                              "type":
+                                  "sentinel-2-l2a",
+
+                              "dataFilter": {
+
+                                  "timeRange": {
+
+                                      "from":
+                                          day_start,
+
+                                      "to":
+                                          day_end
+
+                                  },
+
+                                  "mosaickingOrder":
+                                      "leastCC"
+
+                              }
+
+                          }
 
                       ]
 
                   },
 
-                  "data": [
+                  "output": {
 
-                      {
+                      "width":
+                          1200,
 
-                          "type":
-                              "sentinel-2-l2a",
+                      "height":
+                          1200,
 
-                          "dataFilter": {
+                      "responses": [
 
-                              "timeRange": {
+                          {
 
-                                  "from":
-                                      day_start,
+                              "identifier":
+                                  "default",
 
-                                  "to":
-                                      day_end
+                              "format": {
 
-                              },
+                                  "type":
+                                      "image/png"
 
-                              "mosaickingOrder":
-                                  "mostRecent"
+                              }
 
                           }
 
-                      }
+                      ]
 
-                  ]
+                  },
 
-              },
+                  "evalscript":
+                      rgb_evalscript
 
-              "output": {
+              }
 
-                  "width":
-                      width_px,
 
-                  "height":
-                      height_px,
+              rgb_response = requests.post(
 
-                  "responses": [
+                  "https://sh.dataspace.copernicus.eu/process/v1",
 
-                      {
+                  headers=headers,
 
-                          "identifier":
-                              "default",
+                  json=rgb_request,
 
-                          "format": {
+                  timeout=300
+
+              )
+
+
+              if rgb_response.status_code != 200:
+
+                  print(
+                      rgb_response.text[:2000]
+                  )
+
+                  print(
+                      "RGB skipped for",
+                      day
+                  )
+
+                  continue
+
+
+              with open(
+                  rgb_file,
+                  "wb"
+              ) as f:
+
+                  f.write(
+                      rgb_response.content
+                  )
+
+
+              # =================================================
+              # آب - GeoTIFF واقعی 20 متر
+              # =================================================
+
+              water_request = {
+
+                  "input": {
+
+                      "bounds": {
+
+                          "properties": {
+
+                              "crs":
+                              "http://www.opengis.net/def/crs/EPSG/0/32639"
+
+                          },
+
+                          "bbox": [
+
+                              utm_min_x,
+                              utm_min_y,
+                              utm_max_x,
+                              utm_max_y
+
+                          ]
+
+                      },
+
+                      "data": [
+
+                          {
 
                               "type":
-                                  "image/png"
+                                  "sentinel-2-l2a",
+
+                              "dataFilter": {
+
+                                  "timeRange": {
+
+                                      "from":
+                                          day_start,
+
+                                      "to":
+                                          day_end
+
+                                  },
+
+                                  "mosaickingOrder":
+                                      "leastCC"
+
+                              }
 
                           }
 
-                      }
+                      ]
 
-                  ]
+                  },
 
-              },
+                  "output": {
 
-              "evalscript":
-                  water_evalscript
+                      "resx":
+                          WATER_PIXEL_SIZE,
 
-          }
+                      "resy":
+                          WATER_PIXEL_SIZE,
+
+                      "responses": [
+
+                          {
+
+                              "identifier":
+                                  "default",
+
+                              "format": {
+
+                                  "type":
+                                      "image/tiff"
+
+                              }
+
+                          }
+
+                      ]
+
+                  },
+
+                  "evalscript":
+                      water_evalscript
+
+              }
 
 
-          print(
-              "Calculating water..."
-          )
+              water_response = requests.post(
 
+                  "https://sh.dataspace.copernicus.eu/process/v1",
 
-          water_response = requests.post(
+                  headers=headers,
 
-              process_url,
+                  json=water_request,
 
-              headers=headers,
+                  timeout=300
 
-              json=water_request,
-
-              timeout=300
-
-          )
-
-
-          if water_response.status_code != 200:
-
-              print(
-                  water_response.text[:3000]
               )
 
-              raise Exception(
-                  "Water request failed"
+
+              if water_response.status_code != 200:
+
+                  print(
+                      water_response.text[:2000]
+                  )
+
+                  print(
+                      "Water skipped for",
+                      day
+                  )
+
+                  continue
+
+
+              with open(
+                  tiff_file,
+                  "wb"
+              ) as f:
+
+                  f.write(
+                      water_response.content
+                  )
+
+
+              # =================================================
+              # شمارش دقیق پیکسل‌های آب داخل تالاب
+              # =================================================
+
+              with rasterio.open(
+                  tiff_file
+              ) as src:
+
+                  water_array = src.read(1)
+
+                  transform = src.transform
+
+                  raster_crs = src.crs
+
+
+              # تبدیل Polygon به CRS تصویر
+              if raster_crs:
+
+                  to_raster = Transformer.from_crs(
+
+                      "EPSG:4326",
+
+                      raster_crs,
+
+                      always_xy=True
+
+                  ).transform
+
+                  wetland_raster = shp_transform(
+
+                      to_raster,
+
+                      wetland
+
+                  )
+
+              else:
+
+                  wetland_raster = wetland
+
+
+              inside_mask = geometry_mask(
+
+                  [wetland_raster],
+
+                  out_shape=water_array.shape,
+
+                  transform=transform,
+
+                  invert=True
+
               )
 
 
-          with open(
-              WATER_FILE,
-              "wb"
-          ) as f:
-
-              f.write(
-                  water_response.content
+              water_mask = (
+                  (water_array > 0)
+                  &
+                  inside_mask
               )
 
 
-          # =====================================================
-          # شمارش پیکسل‌های آب
-          # =====================================================
-
-          water_image = Image.open(
-              WATER_FILE
-          ).convert("RGBA")
+              water_pixels = int(
+                  np.count_nonzero(
+                      water_mask
+                  )
+              )
 
 
-          pixels = water_image.load()
+              water_area_m2 = (
+                  water_pixels *
+                  WATER_PIXEL_SIZE *
+                  WATER_PIXEL_SIZE
+              )
 
 
-          water_pixels = 0
+              water_area_ha = (
+                  water_area_m2 /
+                  10000.0
+              )
 
 
-          for y in range(
-              water_image.height
-          ):
+              # =================================================
+              # ساخت PNG آب برای نمایش سایت
+              # =================================================
 
-              for x in range(
-                  water_image.width
+              water_display = np.zeros(
+
+                  (
+                      water_array.shape[0],
+                      water_array.shape[1],
+                      4
+                  ),
+
+                  dtype=np.uint8
+
+              )
+
+
+              water_display[
+                  water_mask,
+                  0
+              ] = 0
+
+              water_display[
+                  water_mask,
+                  1
+              ] = 120
+
+              water_display[
+                  water_mask,
+                  2
+              ] = 255
+
+              water_display[
+                  water_mask,
+                  3
+              ] = 220
+
+
+              Image.fromarray(
+                  water_display
+              ).save(
+                  water_file
+              )
+
+
+              # =================================================
+              # حذف TIFF
+              # =================================================
+
+              if os.path.exists(
+                  tiff_file
               ):
 
-                  alpha = pixels[x, y][3]
-
-                  if alpha > 0:
-
-                      water_pixels += 1
+                  os.remove(
+                      tiff_file
+                  )
 
 
-          # =====================================================
-          # مساحت
-          # =====================================================
+              # =================================================
+              # ذخیره اطلاعات روز
+              # =================================================
 
-          water_area_m2 = (
-              water_pixels *
-              PIXEL_AREA_M2
-          )
-
-
-          water_area_ha = (
-              water_area_m2 /
-              10000.0
-          )
-
-
-          # =====================================================
-          # ذخیره اطلاعات
-          # =====================================================
-
-          info = {
-
-              "updated_at":
-                  datetime.now(
-                      timezone.utc
-                  ).isoformat(),
-
-              "image": {
-
-                  "id":
-                      image_id,
+              archive_items.append({
 
                   "date":
-                      image_date,
+                      day,
 
-                  "date_only":
-                      acquisition_day,
+                  "datetime":
+                      item["datetime"],
 
                   "cloud_cover":
-                      cloud_cover,
+                      cloud,
 
-                  "file":
-                      "data/maharlo_sentinel2.png",
+                  "image":
+                      f"archive/rgb_{day}.png",
 
-                  "bbox":
-                      bbox,
-
-                  "type":
-                      "Sentinel-2 L2A"
-
-              },
-
-              "water": {
-
-                  "file":
-                      "data/maharlo_water.png",
-
-                  "method":
-                      "MNDWI + AWEI",
-
-                  "mndwi":
-                      "(B03-B11)/(B03+B11)",
-
-                  "awei":
-                      "4*(B03-B11)-(0.25*B08+2.75*B12)",
-
-                  "condition":
-                      "AWEI > -0.1 AND MNDWI > 0",
-
-                  "pixel_size_m":
-                      PIXEL_SIZE_M,
-
-                  "pixel_area_m2":
-                      PIXEL_AREA_M2,
+                  "water_image":
+                      f"archive/water_{day}.png",
 
                   "water_pixels":
                       water_pixels,
-
-                  "water_area_m2":
-                      water_area_m2,
 
                   "water_area_ha":
                       round(
@@ -937,71 +1128,161 @@ jobs:
                           2
                       )
 
-              }
+              })
+
+
+              print(
+                  "Water:",
+                  round(
+                      water_area_ha,
+                      2
+                  ),
+                  "ha"
+              )
+
+
+          # =====================================================
+          # مرتب‌سازی
+          # =====================================================
+
+          archive_items.sort(
+
+              key=lambda x:
+                  x["date"],
+
+              reverse=True
+
+          )
+
+
+          # =====================================================
+          # ذخیره آرشیو
+          # =====================================================
+
+          archive = {
+
+              "updated_at":
+                  datetime.now(
+                      timezone.utc
+                  ).isoformat(),
+
+              "period_days":
+                  DAYS_BACK,
+
+              "max_cloud":
+                  MAX_CLOUD,
+
+              "available_days":
+                  len(
+                      archive_items
+                  ),
+
+              "items":
+                  archive_items
 
           }
 
 
+          os.makedirs(
+              "data",
+              exist_ok=True
+          )
+
+
           with open(
-              INFO_FILE,
+              ARCHIVE_JSON,
               "w",
               encoding="utf-8"
           ) as f:
 
               json.dump(
-                  info,
+
+                  archive,
+
                   f,
+
                   ensure_ascii=False,
+
                   indent=2
+
+              )
+
+
+          # =====================================================
+          # آخرین تصویر را در فایل‌های اصلی هم کپی کن
+          # =====================================================
+
+          if archive_items:
+
+              latest = archive_items[0]
+
+
+              source_rgb = latest["image"]
+
+
+              source_water = latest["water_image"]
+
+
+              shutil.copyfile(
+
+                  os.path.join(
+                      "data",
+                      source_rgb
+                  ),
+
+                  "data/maharlo_sentinel2.png"
+
+              )
+
+
+              shutil.copyfile(
+
+                  os.path.join(
+                      "data",
+                      source_water
+                  ),
+
+                  "data/maharlo_water.png"
+
               )
 
 
           print("")
           print(
-              "===================================="
+              "====================================="
           )
 
           print(
-              "IMAGE DATE:",
-              acquisition_day
+              "ARCHIVE COMPLETE"
           )
 
           print(
-              "CLOUD:",
-              cloud_cover
+              "Available days:",
+              len(archive_items)
           )
 
           print(
-              "WATER AREA:",
-              round(
-                  water_area_ha,
-                  2
-              ),
-              "ha"
-          )
-
-          print(
-              "===================================="
-
-          )
+              "=====================================")
 
           PY
 
 
-      - name: Save files
+      - name: Save archive
         run: |
 
           git config user.name "github-actions"
 
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add \
+            data/archive.json \
+            data/archive \
             data/maharlo_sentinel2.png \
-            data/maharlo_water.png \
-            data/wetland-data.json
+            data/maharlo_water.png
 
           git diff --cached --quiet || \
             git commit \
-            -m "Update wetland water date and area"
+            -m "Update 30 day wetland archive"
 
           git push
