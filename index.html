@@ -12,10 +12,6 @@
     >
 
     <style>
-        * {
-            box-sizing: border-box;
-        }
-
         body {
             margin: 0;
             font-family: Tahoma, Arial, sans-serif;
@@ -44,23 +40,20 @@
             z-index: 1000;
             width: 320px;
             background: white;
-            padding: 14px;
+            padding: 15px;
             border-radius: 12px;
             box-shadow: 0 3px 15px rgba(0,0,0,.2);
-            line-height: 1.8;
         }
 
         .title {
             font-weight: bold;
-            margin-bottom: 8px;
+            margin-bottom: 10px;
         }
 
         .status {
-            font-size: 13px;
-        }
-
-        .ok {
             color: green;
+            font-size: 13px;
+            line-height: 1.8;
         }
 
         .error {
@@ -78,34 +71,19 @@
 <div id="map"></div>
 
 <div class="panel">
-
     <div class="title">
-        آخرین تصویر Sentinel-2
+        تصویر Sentinel-2
     </div>
 
     <div id="status" class="status">
         در حال بارگذاری...
     </div>
 
-    <div id="details" style="display:none;">
-
-        <div>
-            تاریخ:
-            <b id="date"></b>
-        </div>
-
-        <div>
-            درصد ابر:
-            <b id="cloud"></b>
-        </div>
-
-        <div>
-            نوع تصویر:
-            <b id="type"></b>
-        </div>
-
+    <div id="info" style="display:none; margin-top:8px;">
+        <div>نوع: <b id="type"></b></div>
+        <div>ابر مجاز: <b id="cloud"></b></div>
+        <div>بازه جست‌وجو: <b id="days"></b> روز</div>
     </div>
-
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -120,147 +98,123 @@ const map = L.map("map").setView(
 L.tileLayer(
     "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
     {
-        attribution:
-            "&copy; OpenStreetMap"
+        attribution: "&copy; OpenStreetMap contributors"
     }
 ).addTo(map);
 
 
 /* --------------------------------
-   بارگذاری مرز تالاب
+   مرز تالاب
 -------------------------------- */
 
-async function loadSite() {
+fetch(
+    "bestar_talab_maharlo.geojson?" +
+    Date.now()
+)
 
-    try {
+.then(response => {
 
-        const geoResponse =
-            await fetch(
-                "bestar_talab_maharlo.geojson?" +
-                Date.now()
-            );
+    if (!response.ok) {
+        throw new Error(
+            "مرز تالاب پیدا نشد."
+        );
+    }
 
-        if (!geoResponse.ok) {
-            throw new Error(
-                "مرز تالاب پیدا نشد."
-            );
-        }
+    return response.json();
 
-        const geojson =
-            await geoResponse.json();
+})
 
+.then(geojson => {
 
-        const wetland =
-            L.geoJSON(
-                geojson,
-                {
-                    style: {
-                        color: "#0066ff",
-                        weight: 3,
-                        fillColor: "#00aaff",
-                        fillOpacity: 0.18
-                    }
+    const wetland =
+        L.geoJSON(
+            geojson,
+            {
+                style: {
+                    color: "#0066ff",
+                    weight: 3,
+                    fillColor: "#00aaff",
+                    fillOpacity: 0.15
                 }
-            ).addTo(map);
+            }
+        ).addTo(map);
+
+    const bounds =
+        wetland.getBounds();
+
+    if (bounds.isValid()) {
+
+        map.fitBounds(
+            bounds,
+            {
+                padding: [20, 20]
+            }
+        );
+
+    }
+
+    loadSentinel();
+
+})
+
+.catch(error => {
+
+    document.getElementById(
+        "status"
+    ).textContent =
+        error.message;
+
+    document.getElementById(
+        "status"
+    ).className =
+        "status error";
+
+});
 
 
-        const wetlandBounds =
-            wetland.getBounds();
+/* --------------------------------
+   تصویر Sentinel-2
+-------------------------------- */
 
+function loadSentinel() {
 
-        if (wetlandBounds.isValid()) {
+    /*
+       محدوده واقعی تالاب
+       از wetland-data.json
+    */
 
-            map.fitBounds(
-                wetlandBounds,
-                {
-                    padding: [20, 20]
-                }
-            );
+    fetch(
+        "data/wetland-data.json?" +
+        Date.now()
+    )
 
-        }
+    .then(response => {
 
-
-        /* --------------------------------
-           دریافت اطلاعات تصویر
-        -------------------------------- */
-
-        const dataResponse =
-            await fetch(
-                "data/wetland-data.json?" +
-                Date.now()
-            );
-
-        if (!dataResponse.ok) {
-
+        if (!response.ok) {
             throw new Error(
-                "فایل اطلاعات تصویر پیدا نشد."
+                "فایل اطلاعات Sentinel-2 پیدا نشد."
             );
-
         }
 
+        return response.json();
 
-        const data =
-            await dataResponse.json();
+    })
 
+    .then(data => {
 
-        /*
-           ساختار جدید فایل JSON:
-           
-           data.image.file
-           data.image.bbox
-           data.image.type
-        */
+        console.log(
+            "Sentinel data:",
+            data
+        );
 
 
         if (
             !data.image ||
-            !data.image.file
+            !data.image.bbox
         ) {
 
             throw new Error(
-                "اطلاعات تصویر Sentinel-2 پیدا نشد."
-            );
-
-        }
-
-
-        /* --------------------------------
-           نمایش اطلاعات
-        -------------------------------- */
-
-        document.getElementById(
-            "type"
-        ).textContent =
-            data.image.type || "Sentinel-2";
-
-
-        document.getElementById(
-            "details"
-        ).style.display =
-            "block";
-
-
-        /* --------------------------------
-           نمایش تصویر
-        -------------------------------- */
-
-        const imageUrl =
-            data.image.file +
-            "?" +
-            Date.now();
-
-
-        const bbox =
-            data.image.bbox;
-
-
-        if (
-            !bbox ||
-            bbox.length !== 4
-        ) {
-
-            throw new Error(
-                "محدوده تصویر مشخص نیست."
+                "اطلاعات محدوده تصویر پیدا نشد."
             );
 
         }
@@ -268,8 +222,14 @@ async function loadSite() {
 
         /*
            BBOX:
-           [minLon, minLat, maxLon, maxLat]
+
+           [minLon, minLat,
+            maxLon, maxLat]
         */
+
+        const bbox =
+            data.image.bbox;
+
 
         const imageBounds = [
 
@@ -287,13 +247,21 @@ async function loadSite() {
 
 
         /*
-           اضافه کردن تصویر
-           روی نقشه
+           فایل واقعی تصویر
         */
 
-        const image =
+        const imageURL =
+            "data/maharlo_sentinel2.png?" +
+            Date.now();
+
+
+        /*
+           اضافه کردن تصویر
+        */
+
+        const sentinelLayer =
             L.imageOverlay(
-                imageUrl,
+                imageURL,
                 imageBounds,
                 {
                     opacity: 0.75,
@@ -302,35 +270,47 @@ async function loadSite() {
             );
 
 
-        image.addTo(map);
+        sentinelLayer.addTo(map);
 
 
         /*
-           زوم روی تالاب
+           اطلاعات
         */
 
-        map.fitBounds(
-            wetlandBounds,
-            {
-                padding: [20, 20]
-            }
-        );
+        document.getElementById(
+            "type"
+        ).textContent =
+            data.image.type ||
+            "Sentinel-2 L2A";
+
+
+        document.getElementById(
+            "cloud"
+        ).textContent =
+            data.image.max_cloud +
+            "%";
+
+
+        document.getElementById(
+            "days"
+        ).textContent =
+            data.image.period_days;
+
+
+        document.getElementById(
+            "info"
+        ).style.display =
+            "block";
 
 
         document.getElementById(
             "status"
         ).textContent =
-            "تصویر Sentinel-2 نمایش داده شد.";
+            "تصویر Sentinel-2 با موفقیت روی نقشه نمایش داده شد.";
 
-        document.getElementById(
-            "status"
-        ).className =
-            "status ok";
+    })
 
-
-    }
-
-    catch (error) {
+    .catch(error => {
 
         console.error(error);
 
@@ -344,12 +324,9 @@ async function loadSite() {
         ).className =
             "status error";
 
-    }
+    });
 
 }
-
-
-loadSite();
 
 </script>
 
