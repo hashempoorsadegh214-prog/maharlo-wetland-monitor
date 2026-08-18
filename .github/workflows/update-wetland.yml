@@ -1,38 +1,154 @@
-name: Test Copernicus Login
+name: Find Latest Sentinel-2
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"
 
 jobs:
-  test:
+  find-image:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Test login
-        env:
-          CDSE_USERNAME: ${{ secrets.CDSE_USERNAME }}
-          CDSE_PASSWORD: ${{ secrets.CDSE_PASSWORD }}
+      - name: Get repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install requests
+        run: pip install requests
+
+      - name: Find Sentinel-2
         run: |
           python - <<'PY'
-          import os
+          import json
           import requests
+          from datetime import datetime, timedelta, timezone
 
-          url = "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token"
+          GEOJSON_FILE = "bestar_talab_maharlo.geojson"
+          OUTPUT_FILE = "data/wetland-data.json"
 
-          data = {
-              "client_id": "cdse-public",
-              "grant_type": "password",
-              "username": os.environ["CDSE_USERNAME"],
-              "password": os.environ["CDSE_PASSWORD"]
+          # خواندن مرز تالاب
+          with open(GEOJSON_FILE, "r", encoding="utf-8") as f:
+              data = json.load(f)
+
+          geometry = data["features"][0]["geometry"]
+
+          # پیدا کردن محدوده تالاب
+          all_points = []
+
+          def collect(obj):
+              if (
+                  isinstance(obj, list)
+                  and len(obj) >= 2
+                  and isinstance(obj[0], (int, float))
+                  and isinstance(obj[1], (int, float))
+              ):
+                  all_points.append((obj[0], obj[1]))
+              elif isinstance(obj, list):
+                  for x in obj:
+                      collect(x)
+
+          collect(geometry["coordinates"])
+
+          min_lon = min(p[0] for p in all_points)
+          min_lat = min(p[1] for p in all_points)
+          max_lon = max(p[0] for p in all_points)
+          max_lat = max(p[1] for p in all_points)
+
+          # جست‌وجوی 30 روز اخیر
+          now = datetime.now(timezone.utc)
+          start = now - timedelta(days=30)
+
+          request = {
+              "collections": ["sentinel-2-l2a"],
+              "datetime": f"{start.isoformat()}/{now.isoformat()}",
+              "bbox": [
+                  min_lon,
+                  min_lat,
+                  max_lon,
+                  max_lat
+              ],
+              "query": {
+                  "eo:cloud_cover": {
+                      "lte": 20
+                  }
+              },
+              "limit": 50,
+              "sortby": [
+                  {
+                      "field": "properties.eo:cloud_cover",
+                      "direction": "asc"
+                  }
+              ]
           }
 
-          r = requests.post(url, data=data, timeout=60)
+          url = "https://stac.dataspace.copernicus.eu/v1/search"
 
-          print("HTTP STATUS:", r.status_code)
-          print("RESPONSE:", r.text[:500])
+          response = requests.post(
+              url,
+              json=request,
+              timeout=120
+          )
 
-          if r.status_code != 200:
-              raise SystemExit("Copernicus login failed")
+          response.raise_for_status()
 
-          print("Copernicus login OK")
+          results = response.json()
+
+          features = results.get("features", [])
+
+          if not features:
+              raise Exception(
+                  "هیچ تصویر Sentinel-2 با ابر کمتر از 20 درصد پیدا نشد."
+              )
+
+          best = features[0]
+
+          output = {
+              "updated_at": datetime.now(timezone.utc).isoformat(),
+              "image_id": best.get("id"),
+              "date": best.get("properties", {}).get("datetime"),
+              "cloud_cover": best.get("properties", {}).get("eo:cloud_cover"),
+              "geometry": best.get("geometry"),
+              "assets": best.get("assets", {}),
+              "wetland_bbox": [
+                  min_lon,
+                  min_lat,
+                  max_lon,
+                  max_lat
+              ]
+          }
+
+          import os
+          os.makedirs("data", exist_ok=True)
+
+          with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+              json.dump(
+                  output,
+                  f,
+                  ensure_ascii=False,
+                  indent=2
+              )
+
+          print("================================")
+          print("Sentinel-2 image found")
+          print("ID:", output["image_id"])
+          print("Date:", output["date"])
+          print("Cloud:", output["cloud_cover"])
+          print("================================")
           PY
+
+      - name: Save result
+        run: |
+          git config user.name "github-actions"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add data/wetland-data.json
+
+          git diff --cached --quiet || \
+            git commit -m "Update Sentinel-2 data"
+
+          git push
