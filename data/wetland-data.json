@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-08-18T23:24:47.597166+00:00",
+  "updated_at": "2026-08-18T23:30:05.702191+00:00",
   "image": {
     "file": "data/maharlo_sentinel2.png",
     "bbox": [
@@ -9,14 +9,13 @@
       29.565711701000094
     ],
     "type": "Sentinel-2 L2A",
-    "max_cloud": 20,
-    "period_days": 30
+    "max_cloud": 20
   },
   "water": {
     "file": "data/maharlo_water.png",
     "method": "MNDWI + AWEI",
-    "mndwi_formula": "(B03 - B11) / (B03 + B11)",
-    "awei_formula": "4*(B03-B11) - (0.25*B08 + 2.75*B12)",
+    "mndwi": "(B03 - B11) / (B03 + B11)",
+    "awei": "4*(B03-B11) - (0.25*B08 + 2.75*B12)",
     "condition": "AWEI > -0.1 AND MNDWI > 0"
   }
 }
