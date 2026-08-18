@@ -78,51 +78,66 @@
 <div id="map"></div>
 
 <div class="panel">
-    <div class="title">آخرین تصویر Sentinel-2</div>
+
+    <div class="title">
+        آخرین تصویر Sentinel-2
+    </div>
 
     <div id="status" class="status">
         در حال بارگذاری...
     </div>
 
     <div id="details" style="display:none;">
-        <div>تاریخ: <b id="date"></b></div>
-        <div>ابر: <b id="cloud"></b></div>
-        <div>تصویر: <b id="imageId"></b></div>
+
+        <div>
+            تاریخ:
+            <b id="date"></b>
+        </div>
+
+        <div>
+            درصد ابر:
+            <b id="cloud"></b>
+        </div>
+
+        <div>
+            نوع تصویر:
+            <b id="type"></b>
+        </div>
+
     </div>
+
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <script>
 
-const map = L.map("map").setView([29.43, 52.82], 10);
+const map = L.map("map").setView(
+    [29.43, 52.82],
+    10
+);
 
 L.tileLayer(
     "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
     {
-        attribution: "&copy; OpenStreetMap"
+        attribution:
+            "&copy; OpenStreetMap"
     }
 ).addTo(map);
 
 
-/* -----------------------------
-   مرز تالاب
------------------------------ */
+/* --------------------------------
+   بارگذاری مرز تالاب
+-------------------------------- */
 
-let wetlandLayer = null;
-
-
-/* -----------------------------
-   بارگذاری اطلاعات
------------------------------ */
-
-async function loadData() {
+async function loadSite() {
 
     try {
 
         const geoResponse =
             await fetch(
-                "bestar_talab_maharlo.geojson"
+                "bestar_talab_maharlo.geojson?" +
+                Date.now()
             );
 
         if (!geoResponse.ok) {
@@ -135,7 +150,7 @@ async function loadData() {
             await geoResponse.json();
 
 
-        wetlandLayer =
+        const wetland =
             L.geoJSON(
                 geojson,
                 {
@@ -150,231 +165,10 @@ async function loadData() {
 
 
         const wetlandBounds =
-            wetlandLayer.getBounds();
-
-        map.fitBounds(
-            wetlandBounds,
-            {
-                padding: [20, 20]
-            }
-        );
+            wetland.getBounds();
 
 
-        /* -----------------------------
-           اطلاعات Sentinel-2
-        ----------------------------- */
-
-        const dataResponse =
-            await fetch(
-                "data/wetland-data.json?"+Date.now()
-            );
-
-        if (!dataResponse.ok) {
-            throw new Error(
-                "فایل اطلاعات Sentinel-2 پیدا نشد."
-            );
-        }
-
-        const data =
-            await dataResponse.json();
-
-
-        const image =
-            data.sentinel2;
-
-
-        if (!image) {
-            throw new Error(
-                "تصویر Sentinel-2 پیدا نشده است."
-            );
-        }
-
-
-        /* -----------------------------
-           نمایش اطلاعات
-        ----------------------------- */
-
-        document.getElementById(
-            "date"
-        ).textContent =
-            image.date
-            ? new Date(
-                image.date
-            ).toLocaleString(
-                "fa-IR"
-            )
-            : "---";
-
-
-        document.getElementById(
-            "cloud"
-        ).textContent =
-            image.cloud_cover != null
-            ? Number(
-                image.cloud_cover
-              ).toFixed(1) + "%"
-            : "---";
-
-
-        document.getElementById(
-            "imageId"
-        ).textContent =
-            image.id || "---";
-
-
-        document.getElementById(
-            "details"
-        ).style.display =
-            "block";
-
-
-        /* -----------------------------
-           پیدا کردن Thumbnail
-        ----------------------------- */
-
-        let imageUrl = null;
-
-
-        if (
-            image.assets &&
-            image.assets.thumbnail &&
-            image.assets.thumbnail.href
-        ) {
-
-            imageUrl =
-                image.assets.thumbnail.href;
-
-        }
-
-
-        /*
-           اگر thumbnail نبود،
-           TCI را امتحان می‌کنیم.
-        */
-
-        if (
-            !imageUrl &&
-            image.assets &&
-            image.assets.TCI_10m &&
-            image.assets.TCI_10m.href
-        ) {
-
-            imageUrl =
-                image.assets.TCI_10m.href;
-
-        }
-
-
-        if (!imageUrl) {
-
-            throw new Error(
-                "برای این تصویر، پیش‌نمایش قابل نمایش پیدا نشد."
-            );
-        }
-
-
-        /*
-           فقط لینک‌های HTTP قابل نمایش
-        */
-
-        if (
-            !imageUrl.startsWith(
-                "http://"
-            ) &&
-            !imageUrl.startsWith(
-                "https://"
-            )
-        ) {
-
-            throw new Error(
-                "لینک تصویر مستقیماً برای نمایش در سایت قابل استفاده نیست."
-            );
-        }
-
-
-        /* -----------------------------
-           محدوده تصویر
-        ----------------------------- */
-
-        let imageBounds = null;
-
-
-        if (
-            image.footprint &&
-            image.footprint.coordinates
-        ) {
-
-            const imageLayer =
-                L.geoJSON(
-                    image.footprint,
-                    {
-                        style: {
-                            color: "#ff0000",
-                            weight: 2,
-                            fillOpacity: 0
-                        }
-                    }
-                );
-
-            imageBounds =
-                imageLayer.getBounds();
-
-
-            imageLayer
-                .addTo(map);
-
-
-            /*
-               تصویر را روی محدوده صحنه قرار می‌دهیم.
-            */
-        }
-
-
-        /*
-           اگر footprint موجود نبود،
-           از bbox تالاب استفاده می‌کنیم.
-        */
-
-        if (
-            !imageBounds &&
-            data.wetland &&
-            data.wetland.bbox
-        ) {
-
-            const b =
-                data.wetland.bbox;
-
-            imageBounds = [
-                [b[1], b[0]],
-                [b[3], b[2]]
-            ];
-
-        }
-
-
-        /* -----------------------------
-           نمایش تصویر
-        ----------------------------- */
-
-        if (imageBounds) {
-
-            const overlay =
-                L.imageOverlay(
-                    imageUrl,
-                    imageBounds,
-                    {
-                        opacity: 0.75,
-                        interactive: true
-                    }
-                );
-
-
-            overlay.addTo(map);
-
-
-            /*
-               تصویر در محدوده خودش باشد.
-            */
+        if (wetlandBounds.isValid()) {
 
             map.fitBounds(
                 wetlandBounds,
@@ -386,15 +180,153 @@ async function loadData() {
         }
 
 
+        /* --------------------------------
+           دریافت اطلاعات تصویر
+        -------------------------------- */
+
+        const dataResponse =
+            await fetch(
+                "data/wetland-data.json?" +
+                Date.now()
+            );
+
+        if (!dataResponse.ok) {
+
+            throw new Error(
+                "فایل اطلاعات تصویر پیدا نشد."
+            );
+
+        }
+
+
+        const data =
+            await dataResponse.json();
+
+
+        /*
+           ساختار جدید فایل JSON:
+           
+           data.image.file
+           data.image.bbox
+           data.image.type
+        */
+
+
+        if (
+            !data.image ||
+            !data.image.file
+        ) {
+
+            throw new Error(
+                "اطلاعات تصویر Sentinel-2 پیدا نشد."
+            );
+
+        }
+
+
+        /* --------------------------------
+           نمایش اطلاعات
+        -------------------------------- */
+
+        document.getElementById(
+            "type"
+        ).textContent =
+            data.image.type || "Sentinel-2";
+
+
+        document.getElementById(
+            "details"
+        ).style.display =
+            "block";
+
+
+        /* --------------------------------
+           نمایش تصویر
+        -------------------------------- */
+
+        const imageUrl =
+            data.image.file +
+            "?" +
+            Date.now();
+
+
+        const bbox =
+            data.image.bbox;
+
+
+        if (
+            !bbox ||
+            bbox.length !== 4
+        ) {
+
+            throw new Error(
+                "محدوده تصویر مشخص نیست."
+            );
+
+        }
+
+
+        /*
+           BBOX:
+           [minLon, minLat, maxLon, maxLat]
+        */
+
+        const imageBounds = [
+
+            [
+                bbox[1],
+                bbox[0]
+            ],
+
+            [
+                bbox[3],
+                bbox[2]
+            ]
+
+        ];
+
+
+        /*
+           اضافه کردن تصویر
+           روی نقشه
+        */
+
+        const image =
+            L.imageOverlay(
+                imageUrl,
+                imageBounds,
+                {
+                    opacity: 0.75,
+                    interactive: true
+                }
+            );
+
+
+        image.addTo(map);
+
+
+        /*
+           زوم روی تالاب
+        */
+
+        map.fitBounds(
+            wetlandBounds,
+            {
+                padding: [20, 20]
+            }
+        );
+
+
         document.getElementById(
             "status"
         ).textContent =
-            "تصویر Sentinel-2 روی نقشه نمایش داده شد.";
+            "تصویر Sentinel-2 نمایش داده شد.";
 
         document.getElementById(
             "status"
         ).className =
             "status ok";
+
 
     }
 
@@ -417,7 +349,7 @@ async function loadData() {
 }
 
 
-loadData();
+loadSite();
 
 </script>
 
