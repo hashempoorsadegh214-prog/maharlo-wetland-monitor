@@ -24,7 +24,7 @@ jobs:
         run: |
           pip install requests
 
-      - name: Download Sentinel-2 and NDWI
+      - name: Download Sentinel-2 RGB
         env:
           CDSE_CLIENT_ID: ${{ secrets.CDSE_CLIENT_ID }}
           CDSE_CLIENT_SECRET: ${{ secrets.CDSE_CLIENT_SECRET }}
@@ -40,22 +40,22 @@ jobs:
           from datetime import datetime, timedelta, timezone
 
 
-          # =========================================
+          # =====================================================
           # فایل‌ها
-          # =========================================
+          # =====================================================
 
           GEOJSON_FILE = "bestar_talab_maharlo.geojson"
 
           RGB_FILE = "data/maharlo_sentinel2.png"
 
-          NDWI_FILE = "data/maharlo_ndwi.png"
+          WATER_FILE = "data/maharlo_water.png"
 
           INFO_FILE = "data/wetland-data.json"
 
 
-          # =========================================
+          # =====================================================
           # خواندن مرز تالاب
-          # =========================================
+          # =====================================================
 
           with open(
               GEOJSON_FILE,
@@ -69,9 +69,9 @@ jobs:
           geometry = geojson["features"][0]["geometry"]
 
 
-          # =========================================
+          # =====================================================
           # پیدا کردن BBOX
-          # =========================================
+          # =====================================================
 
           points = []
 
@@ -129,9 +129,9 @@ jobs:
           print(bbox)
 
 
-          # =========================================
-          # ورود به Copernicus
-          # =========================================
+          # =====================================================
+          # دریافت توکن Copernicus
+          # =====================================================
 
           token_url = (
               "https://identity.dataspace.copernicus.eu/"
@@ -178,9 +178,14 @@ jobs:
           )
 
 
-          # =========================================
-          # زمان جست‌وجو
-          # =========================================
+          print(
+              "Copernicus authentication OK"
+          )
+
+
+          # =====================================================
+          # بازه زمانی
+          # =====================================================
 
           now = datetime.now(
               timezone.utc
@@ -192,9 +197,9 @@ jobs:
           )
 
 
-          # =========================================
+          # =====================================================
           # آدرس Process API
-          # =========================================
+          # =====================================================
 
           process_url = (
               "https://sh.dataspace.copernicus.eu/"
@@ -214,9 +219,9 @@ jobs:
           }
 
 
-          # =========================================
-          # ۱- تصویر رنگی
-          # =========================================
+          # =====================================================
+          # تصویر RGB
+          # =====================================================
 
           rgb_evalscript = """
 
@@ -233,12 +238,8 @@ jobs:
                   ],
 
                   output: {
-
                       bands: 3,
-
-                      sampleType:
-                          "AUTO"
-
+                      sampleType: "AUTO"
                   }
 
               };
@@ -354,15 +355,10 @@ jobs:
 
 
           rgb_response = requests.post(
-
               process_url,
-
               headers=headers,
-
               json=rgb_request,
-
               timeout=300
-
           )
 
 
@@ -379,7 +375,7 @@ jobs:
               )
 
               raise Exception(
-                  "RGB image request failed"
+                  "RGB request failed"
               )
 
 
@@ -404,11 +400,11 @@ jobs:
           )
 
 
-          # =========================================
-          # ۲- NDWI
-          # =========================================
+          # =====================================================
+          # MNDWI + AWEI
+          # =====================================================
 
-          ndwi_evalscript = """
+          water_evalscript = """
 
           //VERSION=3
 
@@ -419,15 +415,15 @@ jobs:
                   input: [
                       "B03",
                       "B08",
-                      "dataMask"
+                      "B11",
+                      "B12"
                   ],
 
                   output: {
 
                       bands: 4,
 
-                      sampleType:
-                          "AUTO"
+                      sampleType: "AUTO"
 
                   }
 
@@ -438,47 +434,73 @@ jobs:
 
           function evaluatePixel(sample) {
 
-              let ndwi =
-                  (sample.B03 - sample.B08) /
-                  (sample.B03 + sample.B08);
+              let mndwi =
+                  (sample.B03 - sample.B11) /
+                  (sample.B03 + sample.B11);
+
+
+              let awei =
+                  4 * (sample.B03 - sample.B11) -
+                  (
+                      0.25 * sample.B08 +
+                      2.75 * sample.B12
+                  );
 
 
               /*
-                 فقط قسمت‌های با NDWI مثبت
-                 نمایش داده شوند.
+                 شرط تشخیص آب
               */
 
               if (
-                  sample.dataMask == 0 ||
-                  ndwi <= 0
+                  awei > -0.1 &&
+                  mndwi > 0
               ) {
 
+                  /*
+                     شدت نمایش براساس MNDWI
+                  */
+
+                  let intensity =
+                      Math.min(
+                          Math.max(
+                              mndwi * 1.5,
+                              0
+                          ),
+                          1
+                      );
+
+
+                  /*
+                     آبی
+                     و شفافیت متغیر
+                  */
+
                   return [
+
                       0,
-                      0,
-                      0,
-                      0
+
+                      1 - intensity,
+
+                      0.5 +
+                      (intensity * 0.5),
+
+                      0.35 +
+                      (intensity * 0.65)
+
                   ];
 
               }
 
 
               /*
-                 نمایش آبی برای آب
+                 خارج از آب = کاملاً شفاف
               */
 
-              let strength =
-                  Math.min(
-                      1,
-                      ndwi / 0.6
-                  );
-
-
               return [
-                  0.1,
-                  0.55 + (0.35 * strength),
-                  1.0,
-                  0.35 + (0.65 * strength)
+                  0,
+                  0,
+                  0,
+                  0
               ];
 
           }
@@ -486,7 +508,7 @@ jobs:
           """
 
 
-          ndwi_request = {
+          water_request = {
 
               "input": {
 
@@ -566,64 +588,59 @@ jobs:
               },
 
               "evalscript":
-                  ndwi_evalscript
+                  water_evalscript
 
           }
 
 
           print(
-              "Calculating NDWI..."
+              "Calculating MNDWI + AWEI water layer..."
           )
 
 
-          ndwi_response = requests.post(
-
+          water_response = requests.post(
               process_url,
-
               headers=headers,
-
-              json=ndwi_request,
-
+              json=water_request,
               timeout=300
-
           )
 
 
           print(
-              "NDWI HTTP:",
-              ndwi_response.status_code
+              "WATER HTTP:",
+              water_response.status_code
           )
 
 
-          if ndwi_response.status_code != 200:
+          if water_response.status_code != 200:
 
               print(
-                  ndwi_response.text[:3000]
+                  water_response.text[:3000]
               )
 
               raise Exception(
-                  "NDWI request failed"
+                  "Water layer request failed"
               )
 
 
           with open(
-              NDWI_FILE,
+              WATER_FILE,
               "wb"
           ) as f:
 
               f.write(
-                  ndwi_response.content
+                  water_response.content
               )
 
 
           print(
-              "NDWI image saved."
+              "Water layer saved."
           )
 
 
-          # =========================================
+          # =====================================================
           # اطلاعات
-          # =========================================
+          # =====================================================
 
           info = {
 
@@ -652,23 +669,23 @@ jobs:
 
               },
 
-              "ndwi":
+              "water":
               {
 
                   "file":
-                      "data/maharlo_ndwi.png",
+                      "data/maharlo_water.png",
 
-                  "formula":
-                      "(B03 - B08) / (B03 + B08)",
+                  "method":
+                      "MNDWI + AWEI",
 
-                  "green_band":
-                      "B03",
+                  "mndwi_formula":
+                      "(B03 - B11) / (B03 + B11)",
 
-                  "nir_band":
-                      "B08",
+                  "awei_formula":
+                      "4*(B03-B11) - (0.25*B08 + 2.75*B12)",
 
-                  "threshold":
-                      0
+                  "condition":
+                      "AWEI > -0.1 AND MNDWI > 0"
 
               }
 
@@ -689,8 +706,16 @@ jobs:
               )
 
 
+          print("")
           print(
-              "NDWI CREATED SUCCESSFULLY"
+              "======================================"
+          )
+          print(
+              "MNDWI + AWEI WATER LAYER CREATED"
+          )
+          print(
+              "======================================"
+
           )
 
           PY
@@ -706,11 +731,11 @@ jobs:
 
           git add \
             data/maharlo_sentinel2.png \
-            data/maharlo_ndwi.png \
+            data/maharlo_water.png \
             data/wetland-data.json
 
           git diff --cached --quiet || \
             git commit \
-            -m "Add NDWI layer for Maharloo wetland"
+            -m "Add MNDWI AWEI water layer"
 
           git push
