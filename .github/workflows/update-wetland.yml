@@ -19,14 +19,15 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install requests
+      - name: Install packages
         run: |
-          pip install requests
+          pip install requests shapely pillow
 
-      - name: Download Sentinel-2 image
+      - name: Download and clip Sentinel-2
         env:
           CDSE_CLIENT_ID: ${{ secrets.CDSE_CLIENT_ID }}
           CDSE_CLIENT_SECRET: ${{ secrets.CDSE_CLIENT_SECRET }}
+
         run: |
 
           python - <<'PY'
@@ -36,25 +37,23 @@ jobs:
           import requests
 
           from datetime import datetime, timedelta, timezone
+          from PIL import Image, ImageDraw
+          from shapely.geometry import shape
 
 
           # =========================================
-          # فایل مرز تالاب
+          # فایل‌ها
           # =========================================
 
           GEOJSON_FILE = "bestar_talab_maharlo.geojson"
 
-
-          # =========================================
-          # خروجی‌ها
-          # =========================================
-
           IMAGE_FILE = "data/maharlo_sentinel2.png"
+
           INFO_FILE = "data/wetland-data.json"
 
 
           # =========================================
-          # خواندن GeoJSON
+          # خواندن مرز تالاب
           # =========================================
 
           with open(
@@ -69,62 +68,54 @@ jobs:
           geometry = geojson["features"][0]["geometry"]
 
 
-          # =========================================
-          # پیدا کردن Bounding Box
-          # =========================================
+          # حذف Z
+          def remove_z(obj):
 
-          points = []
+              if isinstance(obj, list):
 
+                  if (
+                      len(obj) >= 2
+                      and isinstance(obj[0], (int, float))
+                      and isinstance(obj[1], (int, float))
+                  ):
 
-          def collect_points(obj):
-
-              if (
-                  isinstance(obj, list)
-                  and len(obj) >= 2
-                  and isinstance(obj[0], (int, float))
-                  and isinstance(obj[1], (int, float))
-              ):
-
-                  points.append(
-                      (
+                      return [
                           obj[0],
                           obj[1]
-                      )
-                  )
+                      ]
 
-              elif isinstance(obj, list):
+                  return [
+                      remove_z(item)
+                      for item in obj
+                  ]
 
-                  for item in obj:
-                      collect_points(item)
-
-
-          collect_points(
-              geometry["coordinates"]
-          )
+              return obj
 
 
-          min_lon = min(
-              p[0] for p in points
-          )
+          geometry_2d = {
+              "type": geometry["type"],
+              "coordinates": remove_z(
+                  geometry["coordinates"]
+              )
+          }
 
-          max_lon = max(
-              p[0] for p in points
-          )
 
-          min_lat = min(
-              p[1] for p in points
-          )
+          polygon = shape(
+              geometry_2d
+          ).buffer(0)
 
-          max_lat = max(
-              p[1] for p in points
-          )
 
+          # =========================================
+          # محدوده تالاب
+          # =========================================
+
+          minx, miny, maxx, maxy = polygon.bounds
 
           bbox = [
-              min_lon,
-              min_lat,
-              max_lon,
-              max_lat
+              minx,
+              miny,
+              maxx,
+              maxy
           ]
 
 
@@ -166,7 +157,6 @@ jobs:
               data=token_data,
 
               timeout=60
-
           )
 
 
@@ -189,7 +179,7 @@ jobs:
 
 
           # =========================================
-          # بازه جست‌وجو
+          # بازه زمانی
           # =========================================
 
           now = datetime.now(
@@ -198,14 +188,12 @@ jobs:
 
           start = (
               now -
-              timedelta(
-                  days=30
-              )
+              timedelta(days=30)
           )
 
 
           # =========================================
-          # درخواست تصویر
+          # درخواست Sentinel-2
           # =========================================
 
           process_url = (
@@ -230,7 +218,10 @@ jobs:
 
                   output: {
 
-                      bands: 3
+                      bands: 3,
+
+                      sampleType:
+                          "AUTO"
 
                   }
 
@@ -336,9 +327,9 @@ jobs:
 
               },
 
-
               "evalscript":
                   evalscript
+
           }
 
 
@@ -355,7 +346,7 @@ jobs:
 
 
           print(
-              "Requesting Sentinel-2..."
+              "Downloading Sentinel-2..."
           )
 
 
@@ -368,7 +359,6 @@ jobs:
               json=request_body,
 
               timeout=300
-
           )
 
 
@@ -385,13 +375,18 @@ jobs:
               )
 
               raise Exception(
-                  "Sentinel-2 image request failed"
+                  "Sentinel-2 download failed"
               )
 
 
           # =========================================
-          # ذخیره تصویر
+          # ذخیره تصویر اولیه
           # =========================================
+
+          temp_file = (
+              "data/sentinel_temp.png"
+          )
+
 
           os.makedirs(
               "data",
@@ -400,7 +395,7 @@ jobs:
 
 
           with open(
-              IMAGE_FILE,
+              temp_file,
               "wb"
           ) as f:
 
@@ -410,7 +405,142 @@ jobs:
 
 
           # =========================================
-          # اطلاعات نتیجه
+          # برش دقیق با مرز تالاب
+          # =========================================
+
+          print(
+              "Clipping image to wetland boundary..."
+          )
+
+
+          image = Image.open(
+              temp_file
+          ).convert("RGBA")
+
+
+          width, height = image.size
+
+
+          # ماسک شفاف
+          mask = Image.new(
+              "L",
+              (width, height),
+              0
+          )
+
+
+          draw = ImageDraw.Draw(
+              mask
+          )
+
+
+          def lon_to_x(lon):
+
+              return int(
+                  (
+                      (lon - minx)
+                      /
+                      (maxx - minx)
+                  )
+                  * (width - 1)
+              )
+
+
+          def lat_to_y(lat):
+
+              return int(
+                  (
+                      (maxy - lat)
+                      /
+                      (maxy - miny)
+                  )
+                  * (height - 1)
+              )
+
+
+          def draw_polygon(poly):
+
+              # قسمت بیرونی
+              exterior = [
+
+                  (
+                      lon_to_x(x),
+                      lat_to_y(y)
+                  )
+
+                  for x, y in
+                  poly.exterior.coords
+
+              ]
+
+              draw.polygon(
+                  exterior,
+                  fill=255
+              )
+
+
+              # سوراخ‌ها
+              for interior in poly.interiors:
+
+                  hole = [
+
+                      (
+                          lon_to_x(x),
+                          lat_to_y(y)
+                      )
+
+                      for x, y in
+                      interior.coords
+
+                  ]
+
+                  draw.polygon(
+                      hole,
+                      fill=0
+                  )
+
+
+          if polygon.geom_type == "Polygon":
+
+              draw_polygon(
+                  polygon
+              )
+
+
+          elif polygon.geom_type == "MultiPolygon":
+
+              for part in polygon.geoms:
+
+                  draw_polygon(
+                      part
+                  )
+
+
+          # اعمال شفافیت
+          image.putalpha(
+              mask
+          )
+
+
+          # ذخیره تصویر نهایی
+          image.save(
+              IMAGE_FILE,
+              "PNG"
+          )
+
+
+          # حذف فایل موقت
+          if os.path.exists(
+              temp_file
+          ):
+
+              os.remove(
+                  temp_file
+              )
+
+
+          # =========================================
+          # ذخیره اطلاعات
           # =========================================
 
           info = {
@@ -422,6 +552,7 @@ jobs:
 
               "image":
               {
+
                   "file":
                       "data/maharlo_sentinel2.png",
 
@@ -442,7 +573,10 @@ jobs:
                           "B04",
                           "B03",
                           "B02"
-                      ]
+                      ],
+
+                  "clipped":
+                      True
               }
 
           }
@@ -463,14 +597,14 @@ jobs:
 
 
           print(
-              "Sentinel-2 image saved successfully."
+              "Sentinel-2 image clipped successfully."
           )
 
           PY
 
 
       # =========================================
-      # ذخیره در GitHub
+      # ذخیره فایل‌ها
       # =========================================
 
       - name: Save files
@@ -487,6 +621,6 @@ jobs:
 
           git diff --cached --quiet || \
             git commit \
-            -m "Update Maharloo Sentinel-2 image"
+            -m "Clip Sentinel-2 to Maharloo wetland"
 
           git push
