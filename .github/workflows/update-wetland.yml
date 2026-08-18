@@ -21,9 +21,9 @@ jobs:
 
       - name: Install packages
         run: |
-          pip install requests pillow shapely pyproj
+          pip install requests pillow
 
-      - name: Download image and calculate water area
+      - name: Calculate water area
         env:
           CDSE_CLIENT_ID: ${{ secrets.CDSE_CLIENT_ID }}
           CDSE_CLIENT_SECRET: ${{ secrets.CDSE_CLIENT_SECRET }}
@@ -40,10 +40,6 @@ jobs:
 
           from PIL import Image
 
-          from shapely.geometry import shape
-
-          from pyproj import Transformer
-
 
           # =====================================================
           # فایل‌ها
@@ -59,7 +55,7 @@ jobs:
 
 
           # =====================================================
-          # پارامترها
+          # تنظیمات
           # =====================================================
 
           MAX_CLOUD = 20
@@ -74,12 +70,13 @@ jobs:
           )
 
           PIXEL_AREA_HA = (
-              PIXEL_AREA_M2 / 10000
+              PIXEL_AREA_M2 /
+              10000
           )
 
 
           # =====================================================
-          # خواندن مرز تالاب
+          # خواندن GeoJSON
           # =====================================================
 
           with open(
@@ -93,98 +90,80 @@ jobs:
 
           geometry = geojson["features"][0]["geometry"]
 
-          wetland = shape(
-              geometry
-          ).buffer(0)
-
 
           # =====================================================
-          # تبدیل WGS84 به UTM Zone 39N
-          #
-          # مهارلو در این محدوده قرار دارد.
+          # پیدا کردن BBOX
           # =====================================================
 
-          to_utm = Transformer.from_crs(
-              "EPSG:4326",
-              "EPSG:32639",
-              always_xy=True
-          ).transform
+          points = []
 
 
-          wetland_utm = (
-              __import__("shapely").ops.transform(
-                  to_utm,
-                  wetland
-              )
+          def collect_points(obj):
+
+              if (
+                  isinstance(obj, list)
+                  and len(obj) >= 2
+                  and isinstance(obj[0], (int, float))
+                  and isinstance(obj[1], (int, float))
+              ):
+
+                  points.append(
+                      (
+                          obj[0],
+                          obj[1]
+                      )
+                  )
+
+              elif isinstance(obj, list):
+
+                  for item in obj:
+
+                      collect_points(item)
+
+
+          collect_points(
+              geometry["coordinates"]
           )
 
 
-          minx, miny, maxx, maxy = (
-              wetland_utm.bounds
+          min_lon = min(
+              p[0] for p in points
+          )
+
+          max_lon = max(
+              p[0] for p in points
+          )
+
+          min_lat = min(
+              p[1] for p in points
+          )
+
+          max_lat = max(
+              p[1] for p in points
           )
 
 
-          # عرض و ارتفاع بر حسب متر
+          bbox = [
 
-          width_m = maxx - minx
-
-          height_m = maxy - miny
-
-
-          # تعداد پیکسل‌ها با اندازه 20 متر
-
-          width_px = int(
-              round(
-                  width_m /
-                  PIXEL_SIZE_M
-              )
-          )
-
-          height_px = int(
-              round(
-                  height_m /
-                  PIXEL_SIZE_M
-              )
-          )
-
-
-          print(
-              "UTM width:",
-              width_m
-          )
-
-          print(
-              "UTM height:",
-              height_m
-          )
-
-          print(
-              "Output size:",
-              width_px,
-              "x",
-              height_px
-          )
-
-
-          # =====================================================
-          # BBOX جغرافیایی برای RGB
-          # =====================================================
-
-          min_lon, min_lat, max_lon, max_lat = (
-              wetland.bounds
-          )
-
-
-          rgb_bbox = [
               min_lon,
               min_lat,
               max_lon,
               max_lat
+
           ]
 
 
+          print(
+              "Wetland BBOX:"
+          )
+
+          print(
+              bbox
+          )
+
+
           # =====================================================
-          # گرفتن Token
+          # ورود به Copernicus
           # =====================================================
 
           token_url = (
@@ -198,17 +177,24 @@ jobs:
               token_url,
 
               data={
+
                   "grant_type":
                       "client_credentials",
 
                   "client_id":
-                      os.environ["CDSE_CLIENT_ID"],
+                      os.environ[
+                          "CDSE_CLIENT_ID"
+                      ],
 
                   "client_secret":
-                      os.environ["CDSE_CLIENT_SECRET"]
+                      os.environ[
+                          "CDSE_CLIENT_SECRET"
+                      ]
+
               },
 
               timeout=60
+
           )
 
 
@@ -251,6 +237,10 @@ jobs:
           )
 
 
+          # =====================================================
+          # API
+          # =====================================================
+
           process_url = (
               "https://sh.dataspace.copernicus.eu/"
               "process/v1"
@@ -265,11 +255,12 @@ jobs:
 
               "Content-Type":
                   "application/json"
+
           }
 
 
           # =====================================================
-          # RGB
+          # تصویر رنگی
           # =====================================================
 
           rgb_evalscript = """
@@ -331,7 +322,7 @@ jobs:
                       },
 
                       "bbox":
-                          rgb_bbox
+                          bbox
 
                   },
 
@@ -398,7 +389,13 @@ jobs:
 
               "evalscript":
                   rgb_evalscript
+
           }
+
+
+          print(
+              "Downloading RGB..."
+          )
 
 
           rgb_response = requests.post(
@@ -410,6 +407,7 @@ jobs:
               json=rgb_request,
 
               timeout=300
+
           )
 
 
@@ -441,14 +439,12 @@ jobs:
 
 
           print(
-              "RGB image saved."
+              "RGB saved."
           )
 
 
           # =====================================================
           # MNDWI + AWEI
-          #
-          # خروجی در UTM و 20 متر
           # =====================================================
 
           water_evalscript = """
@@ -470,7 +466,8 @@ jobs:
 
                       bands: 4,
 
-                      sampleType: "AUTO"
+                      sampleType:
+                          "AUTO"
 
                   }
 
@@ -487,10 +484,12 @@ jobs:
 
 
               let awei =
-                  4 * (
+                  4 *
+                  (
                       sample.B03 -
                       sample.B11
-                  ) -
+                  )
+                  -
                   (
                       0.25 *
                       sample.B08
@@ -506,20 +505,24 @@ jobs:
               ) {
 
                   return [
+
                       0.0,
                       0.25,
                       1.0,
                       1.0
+
                   ];
 
               }
 
 
               return [
+
                   0.0,
                   0.0,
                   0.0,
                   0.0
+
               ];
 
           }
@@ -536,18 +539,12 @@ jobs:
                       "properties": {
 
                           "crs":
-                          "http://www.opengis.net/def/crs/EPSG/0/32639"
+                          "http://www.opengis.net/def/crs/OGC/1.3/CRS84"
 
                       },
 
-                      "bbox": [
-
-                          minx,
-                          miny,
-                          maxx,
-                          maxy
-
-                      ]
+                      "bbox":
+                          bbox
 
                   },
 
@@ -587,10 +584,10 @@ jobs:
               "output": {
 
                   "width":
-                      width_px,
+                      1200,
 
                   "height":
-                      height_px,
+                      1200,
 
                   "responses": [
 
@@ -614,11 +611,12 @@ jobs:
 
               "evalscript":
                   water_evalscript
+
           }
 
 
           print(
-              "Calculating water layer..."
+              "Calculating water..."
           )
 
 
@@ -631,12 +629,7 @@ jobs:
               json=water_request,
 
               timeout=300
-          )
 
-
-          print(
-              "Water HTTP:",
-              water_response.status_code
           )
 
 
@@ -668,11 +661,6 @@ jobs:
 
           # =====================================================
           # شمارش پیکسل‌های آب
-          #
-          # PNG چهار کاناله است:
-          # RGB + Alpha
-          #
-          # Alpha > 0 یعنی آب تشخیص داده شده
           # =====================================================
 
           image = Image.open(
@@ -680,34 +668,41 @@ jobs:
           ).convert("RGBA")
 
 
+          width = image.width
+
+          height = image.height
+
+
           pixels = image.load()
 
 
           water_pixels = 0
 
-          total_pixels = (
-              image.width *
-              image.height
-          )
-
 
           for y in range(
-              image.height
+              height
           ):
 
               for x in range(
-                  image.width
+                  width
               ):
 
-                  alpha = pixels[x, y][3]
+                  alpha =
+                      pixels[x, y][3]
 
                   if alpha > 0:
 
                       water_pixels += 1
 
 
+          print(
+              "Water pixels:",
+              water_pixels
+          )
+
+
           # =====================================================
-          # محاسبه مساحت
+          # مساحت
           # =====================================================
 
           water_area_m2 = (
@@ -723,23 +718,22 @@ jobs:
 
 
           print(
-              "Water pixels:",
-              water_pixels
-          )
-
-          print(
-              "Water area m2:",
+              "Water area (m2):",
               water_area_m2
           )
 
+
           print(
-              "Water area ha:",
-              water_area_ha
+              "Water area (ha):",
+              round(
+                  water_area_ha,
+                  2
+              )
           )
 
 
           # =====================================================
-          # ذخیره اطلاعات
+          # JSON
           # =====================================================
 
           info = {
@@ -755,7 +749,7 @@ jobs:
                       "data/maharlo_sentinel2.png",
 
                   "bbox":
-                      rgb_bbox,
+                      bbox,
 
                   "type":
                       "Sentinel-2 L2A",
@@ -765,6 +759,7 @@ jobs:
 
                   "period_days":
                       DAYS_BACK
+
               },
 
               "water": {
@@ -786,6 +781,9 @@ jobs:
 
                   "pixel_size_m":
                       PIXEL_SIZE_M,
+
+                  "pixel_area_m2":
+                      PIXEL_AREA_M2,
 
                   "pixel_area_ha":
                       PIXEL_AREA_HA,
@@ -823,24 +821,23 @@ jobs:
 
           print("")
           print(
-              "======================================"
+              "================================"
           )
 
           print(
-              "WATER AREA CALCULATED"
+              "WATER AREA CALCULATED:"
           )
 
           print(
-              "Area:",
               round(
                   water_area_ha,
                   2
               ),
-              "hectares"
+              "ha"
           )
 
           print(
-              "======================================"
+              "================================"
           )
 
           PY
