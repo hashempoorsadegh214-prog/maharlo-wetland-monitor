@@ -1,729 +1,643 @@
-<!DOCTYPE html>
-<html lang="fa" dir="rtl">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-    <title>سامانه پایش تالاب مهارلو</title>
-
-    <link
-        rel="stylesheet"
-        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    >
-
-    <style>
-        * {
-            box-sizing: border-box;
-        }
-
-        body {
-            margin: 0;
-            font-family: Tahoma, Arial, sans-serif;
-            background: #f4f6f8;
-        }
-
-        header {
-            height: 60px;
-            background: #f28c28;
-            color: white;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 20px;
-            font-weight: bold;
-        }
-
-        #map {
-            width: 100%;
-            height: calc(100vh - 60px);
-        }
-
-        .panel {
-            position: absolute;
-            top: 75px;
-            right: 15px;
-            z-index: 1000;
-            width: 320px;
-            max-width: calc(100% - 30px);
-            background: white;
-            padding: 15px;
-            border-radius: 12px;
-            box-shadow: 0 3px 15px rgba(0, 0, 0, 0.2);
-            line-height: 1.8;
-        }
-
-        .title {
-            font-weight: bold;
-            margin-bottom: 10px;
-            font-size: 17px;
-        }
-
-        .status {
-            color: #067647;
-            font-size: 13px;
-        }
-
-        .error {
-            color: #b42318;
-        }
-
-        .info {
-            margin-top: 10px;
-            padding-top: 10px;
-            border-top: 1px solid #ddd;
-            font-size: 13px;
-        }
-    </style>
-</head>
-
-<body>
-
-<header>
-    سامانه پایش تالاب مهارلو
-</header>
-
-<div id="map"></div>
-
-<div class="panel">
-
-    <div class="title">
-        آخرین تصویر Sentinel-2
-    </div>
-
-    <div id="status" class="status">
-        در حال بارگذاری...
-    </div>
-
-    <div id="info" class="info" style="display:none;">
-
-        <div>
-            نوع تصویر:
-            <b id="type">---</b>
-        </div>
+name: Update Maharloo Wetland
 
-        <div>
-            حداکثر ابر:
-            <b id="cloud">---</b>
-        </div>
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"
 
-        <div>
-            بازه جست‌وجو:
-            <b id="days">---</b> روز
-        </div>
+jobs:
+  update-wetland:
 
-    </div>
+    runs-on: ubuntu-latest
 
-</div>
+    steps:
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+      - name: Get repository
+        uses: actions/checkout@v4
 
-<script>
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-/* =========================================================
-   نقشه
-========================================================= */
+      - name: Install packages
+        run: |
+          pip install requests
 
-const map = L.map("map").setView(
-    [29.43, 52.82],
-    10
-);
+      - name: Download Sentinel-2 and calculate NDWI
+        env:
+          CDSE_CLIENT_ID: ${{ secrets.CDSE_CLIENT_ID }}
+          CDSE_CLIENT_SECRET: ${{ secrets.CDSE_CLIENT_SECRET }}
 
-L.tileLayer(
-    "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-    {
-        attribution: "&copy; OpenStreetMap contributors"
-    }
-).addTo(map);
+        run: |
 
+          python - <<'PY'
 
-/* =========================================================
-   عناصر صفحه
-========================================================= */
+          import json
+          import os
+          import requests
 
-const statusEl =
-    document.getElementById("status");
+          from datetime import datetime, timedelta, timezone
 
-const infoEl =
-    document.getElementById("info");
 
-const typeEl =
-    document.getElementById("type");
+          # =====================================================
+          # فایل‌ها
+          # =====================================================
 
-const cloudEl =
-    document.getElementById("cloud");
+          GEOJSON_FILE = "bestar_talab_maharlo.geojson"
 
-const daysEl =
-    document.getElementById("days");
+          RGB_FILE = "data/maharlo_sentinel2.png"
 
+          NDWI_FILE = "data/maharlo_ndwi.png"
 
-/* =========================================================
-   بارگذاری مرز و تصویر
-========================================================= */
+          INFO_FILE = "data/wetland-data.json"
 
-async function loadSite() {
 
-    try {
+          # =====================================================
+          # خواندن مرز تالاب
+          # =====================================================
 
-        /* -----------------------------------------
-           1. دریافت مرز تالاب
-        ----------------------------------------- */
+          with open(
+              GEOJSON_FILE,
+              "r",
+              encoding="utf-8"
+          ) as f:
 
-        const geoResponse =
-            await fetch(
-                "bestar_talab_maharlo.geojson?" +
-                Date.now()
-            );
+              geojson = json.load(f)
 
-        if (!geoResponse.ok) {
 
-            throw new Error(
-                "فایل مرز تالاب پیدا نشد."
-            );
+          geometry = geojson["features"][0]["geometry"]
 
-        }
 
-        const geojson =
-            await geoResponse.json();
+          # =====================================================
+          # پیدا کردن BBOX
+          # =====================================================
 
+          points = []
 
-        /* -----------------------------------------
-           2. نمایش مرز تالاب
-        ----------------------------------------- */
 
-        const wetlandLayer =
-            L.geoJSON(
-                geojson,
-                {
-                    style: {
-                        color: "#0066ff",
-                        weight: 3,
-                        fillColor: "#00aaff",
-                        fillOpacity: 0.12
-                    }
-                }
-            ).addTo(map);
+          def collect_points(obj):
 
+              if (
+                  isinstance(obj, list)
+                  and len(obj) >= 2
+                  and isinstance(obj[0], (int, float))
+                  and isinstance(obj[1], (int, float))
+              ):
 
-        const wetlandBounds =
-            wetlandLayer.getBounds();
+                  points.append(
+                      (obj[0], obj[1])
+                  )
 
+              elif isinstance(obj, list):
 
-        if (wetlandBounds.isValid()) {
+                  for item in obj:
 
-            map.fitBounds(
-                wetlandBounds,
-                {
-                    padding: [20, 20]
-                }
-            );
+                      collect_points(item)
 
-        }
 
+          collect_points(
+              geometry["coordinates"]
+          )
 
-        /* -----------------------------------------
-           3. دریافت اطلاعات تصویر
-        ----------------------------------------- */
 
-        const dataResponse =
-            await fetch(
-                "data/wetland-data.json?" +
-                Date.now()
-            );
+          min_lon = min(
+              p[0] for p in points
+          )
 
-        if (!dataResponse.ok) {
+          max_lon = max(
+              p[0] for p in points
+          )
 
-            throw new Error(
-                "فایل اطلاعات Sentinel-2 پیدا نشد."
-            );
+          min_lat = min(
+              p[1] for p in points
+          )
 
-        }
+          max_lat = max(
+              p[1] for p in points
+          )
 
 
-        const data =
-            await dataResponse.json();
+          bbox = [
+              min_lon,
+              min_lat,
+              max_lon,
+              max_lat
+          ]
 
 
-        if (
-            !data.image ||
-            !data.image.file ||
-            !data.image.bbox
-        ) {
+          print("Wetland BBOX:")
+          print(bbox)
 
-            throw new Error(
-                "اطلاعات تصویر Sentinel-2 کامل نیست."
-            );
 
-        }
+          # =====================================================
+          # دریافت توکن
+          # =====================================================
 
+          token_url = (
+              "https://identity.dataspace.copernicus.eu/"
+              "auth/realms/CDSE/protocol/openid-connect/token"
+          )
 
-        /* -----------------------------------------
-           4. نمایش اطلاعات
-        ----------------------------------------- */
 
-        typeEl.textContent =
-            data.image.type ||
-            "Sentinel-2 L2A";
+          token_data = {
 
-        cloudEl.textContent =
-            data.image.max_cloud != null
-                ? data.image.max_cloud + "%"
-                : "---";
+              "grant_type":
+                  "client_credentials",
 
-        daysEl.textContent =
-            data.image.period_days != null
-                ? data.image.period_days
-                : "---";
+              "client_id":
+                  os.environ["CDSE_CLIENT_ID"],
 
-        infoEl.style.display =
-            "block";
+              "client_secret":
+                  os.environ["CDSE_CLIENT_SECRET"]
 
+          }
 
-        /* -----------------------------------------
-           5. دریافت تصویر ماهواره
-        ----------------------------------------- */
 
-        const imageURL =
-            data.image.file +
-            "?" +
-            Date.now();
+          token_response = requests.post(
 
+              token_url,
 
-        const image =
-            await loadImage(imageURL);
+              data=token_data,
 
+              timeout=60
 
-        /* -----------------------------------------
-           6. ساخت تصویر ماسک‌شده
-        ----------------------------------------- */
+          )
 
-        const clippedImageURL =
-            createClippedImage(
-                image,
-                geojson,
-                data.image.bbox
-            );
 
+          if token_response.status_code != 200:
 
-        /* -----------------------------------------
-           7. محدوده تصویر
-        ----------------------------------------- */
+              print(
+                  token_response.text
+              )
 
-        const bbox =
-            data.image.bbox;
+              raise Exception(
+                  "Copernicus authentication failed"
+              )
 
 
-        const imageBounds = [
+          access_token = (
+              token_response
+              .json()
+              ["access_token"]
+          )
 
-            [
-                bbox[1],
-                bbox[0]
-            ],
 
-            [
-                bbox[3],
-                bbox[2]
-            ]
+          # =====================================================
+          # بازه زمانی
+          # =====================================================
 
-        ];
+          now = datetime.now(
+              timezone.utc
+          )
 
+          start = (
+              now -
+              timedelta(days=30)
+          )
 
-        /* -----------------------------------------
-           8. اضافه کردن تصویر ماسک‌شده
-        ----------------------------------------- */
 
-        const imageLayer =
-            L.imageOverlay(
-                clippedImageURL,
-                imageBounds,
-                {
-                    opacity: 0.85,
-                    interactive: false
-                }
-            );
+          # =====================================================
+          # Evalscript
+          #
+          # B02 B03 B04 = تصویر رنگی
+          # B03 B08     = NDWI
+          # =====================================================
 
+          evalscript = """
 
-        imageLayer.addTo(map);
+          //VERSION=3
 
+          function setup() {
 
-        /* -----------------------------------------
-           9. آوردن مرز روی تصویر
-        ----------------------------------------- */
+              return {
 
-        wetlandLayer.bringToFront();
+                  input: [
+                      "B02",
+                      "B03",
+                      "B04",
+                      "B08"
+                  ],
 
+                  output: [
 
-        /* -----------------------------------------
-           10. پیام موفقیت
-        ----------------------------------------- */
+                      {
+                          id: "rgb",
+                          bands: 3,
+                          sampleType: "AUTO"
+                      },
 
-        statusEl.textContent =
-            "تصویر Sentinel-2 فقط داخل محدوده تالاب نمایش داده شد.";
+                      {
+                          id: "ndwi",
+                          bands: 1,
+                          sampleType: "FLOAT32"
+                      }
 
-        statusEl.className =
-            "status";
+                  ]
 
+              };
 
-    }
+          }
 
-    catch (error) {
 
-        console.error(error);
+          function evaluatePixel(sample) {
 
-        statusEl.textContent =
-            error.message;
+              let ndwi =
+                  (sample.B03 - sample.B08) /
+                  (sample.B03 + sample.B08);
 
-        statusEl.className =
-            "status error";
+              return {
 
-    }
+                  rgb: [
+                      2.5 * sample.B04,
+                      2.5 * sample.B03,
+                      2.5 * sample.B02
+                  ],
 
-}
+                  ndwi: [
+                      ndwi
+                  ]
 
+              };
 
-/* =========================================================
-   بارگذاری تصویر
-========================================================= */
+          }
 
-function loadImage(url) {
+          """
 
-    return new Promise(
-        (resolve, reject) => {
 
-            const img =
-                new Image();
+          # =====================================================
+          # درخواست به Copernicus
+          # =====================================================
 
-            img.onload =
-                function() {
+          process_url = (
+              "https://sh.dataspace.copernicus.eu/"
+              "process/v1"
+          )
 
-                    resolve(img);
 
-                };
+          request_body = {
 
-            img.onerror =
-                function() {
+              "input": {
 
-                    reject(
-                        new Error(
-                            "تصویر Sentinel-2 قابل بارگذاری نیست."
-                        )
-                    );
+                  "bounds": {
 
-                };
+                      "properties": {
 
-            img.src = url;
+                          "crs":
+                          "http://www.opengis.net/def/crs/OGC/1.3/CRS84"
 
-        }
-    );
+                      },
 
-}
+                      "bbox":
+                          bbox
 
+                  },
 
-/* =========================================================
-   تبدیل GeoJSON به Canvas Mask
-========================================================= */
+                  "data": [
 
-function createClippedImage(
-    image,
-    geojson,
-    bbox
-) {
+                      {
 
-    const canvas =
-        document.createElement("canvas");
+                          "type":
+                              "sentinel-2-l2a",
 
-    const width =
-        image.naturalWidth ||
-        image.width;
+                          "dataFilter": {
 
-    const height =
-        image.naturalHeight ||
-        image.height;
+                              "timeRange": {
 
+                                  "from":
+                                      start.isoformat(),
 
-    canvas.width =
-        width;
+                                  "to":
+                                      now.isoformat()
 
-    canvas.height =
-        height;
+                              },
 
+                              "maxCloudCoverage":
+                                  20,
 
-    const ctx =
-        canvas.getContext(
-            "2d"
-        );
+                              "mosaickingOrder":
+                                  "leastCC"
 
+                          }
 
-    /*
-       تصویر را اول می‌کشیم
-    */
+                      }
 
-    ctx.drawImage(
-        image,
-        0,
-        0,
-        width,
-        height
-    );
+                  ]
 
+              },
 
-    /*
-       محدوده BBOX تصویر
-    */
 
-    const minLon =
-        bbox[0];
+              "output": {
 
-    const minLat =
-        bbox[1];
+                  "width":
+                      1200,
 
-    const maxLon =
-        bbox[2];
+                  "height":
+                      1200,
 
-    const maxLat =
-        bbox[3];
+                  "responses": [
 
+                      {
 
-    /*
-       تبدیل مختصات جغرافیایی
-       به مختصات پیکسل
-    */
+                          "identifier":
+                              "rgb",
 
-    function lonToX(lon) {
+                          "format": {
 
-        return (
-            (lon - minLon) /
-            (maxLon - minLon)
-        ) * width;
+                              "type":
+                                  "image/png"
 
-    }
+                          }
 
+                      },
 
-    function latToY(lat) {
+                      {
 
-        return (
-            (maxLat - lat) /
-            (maxLat - minLat)
-        ) * height;
+                          "identifier":
+                              "ndwi",
 
-    }
+                          "format": {
 
+                              "type":
+                                  "image/tiff"
 
-    /*
-       شروع ساخت ماسک
-    */
+                          }
 
-    const maskCanvas =
-        document.createElement("canvas");
+                      }
 
-    maskCanvas.width =
-        width;
+                  ]
 
-    maskCanvas.height =
-        height;
+              },
 
 
-    const maskCtx =
-        maskCanvas.getContext(
-            "2d"
-        );
+              "evalscript":
+                  evalscript
 
+          }
 
-    /*
-       ابتدا همه‌جا شفاف
-    */
 
-    maskCtx.clearRect(
-        0,
-        0,
-        width,
-        height
-    );
+          headers = {
 
+              "Authorization":
+                  "Bearer " +
+                  access_token,
 
-    /*
-       سفید = قسمت قابل مشاهده
-    */
+              "Content-Type":
+                  "application/json"
 
-    maskCtx.fillStyle =
-        "#ffffff";
+          }
 
 
-    /*
-       رسم یک Polygon
-    */
+          print(
+              "Requesting Sentinel-2..."
+          )
 
-    function drawPolygon(
-        polygonCoordinates
-    ) {
 
-        maskCtx.beginPath();
+          response = requests.post(
 
+              process_url,
 
-        for (
-            const ring
-            of polygonCoordinates
-        ) {
+              headers=headers,
 
-            if (
-                !ring ||
-                ring.length < 3
-            ) {
+              json=request_body,
 
-                continue;
+              timeout=300
 
-            }
+          )
 
 
-            const first =
-                ring[0];
+          print(
+              "HTTP:",
+              response.status_code
+          )
 
 
-            maskCtx.moveTo(
-                lonToX(first[0]),
-                latToY(first[1])
-            );
+          if response.status_code != 200:
 
+              print(
+                  response.text[:3000]
+              )
 
-            for (
-                let i = 1;
-                i < ring.length;
-                i++
-            ) {
+              raise Exception(
+                  "Sentinel-2 request failed"
+              )
 
-                const point =
-                    ring[i];
 
+          # =====================================================
+          # پاسخ چندفایلی Copernicus
+          # =====================================================
 
-                maskCtx.lineTo(
-                    lonToX(point[0]),
-                    latToY(point[1])
-                );
+          content_type = response.headers.get(
+              "Content-Type",
+              ""
+          )
 
-            }
+          print(
+              "Content-Type:",
+              content_type
+          )
 
 
-            maskCtx.closePath();
+          # -----------------------------------------------------
+          # اگر پاسخ ZIP باشد
+          # -----------------------------------------------------
 
-        }
+          if "zip" in content_type.lower():
 
+              import zipfile
+              import io
 
-        /*
-           evenodd باعث می‌شود
-           حفره‌های Polygon هم درست باشند
-        */
+              z = zipfile.ZipFile(
+                  io.BytesIO(
+                      response.content
+                  )
+              )
 
-        maskCtx.fill(
-            "evenodd"
-        );
+              print(
+                  "ZIP FILES:",
+                  z.namelist()
+              )
 
-    }
+              os.makedirs(
+                  "data",
+                  exist_ok=True
+              )
 
+              rgb_found = False
+              ndwi_found = False
 
-    /*
-       تشخیص نوع هندسه
-    */
+              for name in z.namelist():
 
-    const feature =
-        geojson.features &&
-        geojson.features.length > 0
-            ? geojson.features[0]
-            : null;
+                  lower = name.lower()
 
+                  if (
+                      lower.endswith(".png")
+                      and "rgb" in lower
+                  ):
 
-    if (!feature) {
+                      with z.open(name) as src:
 
-        throw new Error(
-            "هندسه تالاب پیدا نشد."
-        );
+                          with open(
+                              RGB_FILE,
+                              "wb"
+                          ) as dst:
 
-    }
+                              dst.write(
+                                  src.read()
+                              )
 
+                      rgb_found = True
 
-    const geometry =
-        feature.geometry;
 
+                  elif (
+                      lower.endswith(".tif")
+                      or lower.endswith(".tiff")
+                  ):
 
-    if (
-        geometry.type ===
-        "Polygon"
-    ) {
+                      with z.open(name) as src:
 
-        drawPolygon(
-            geometry.coordinates
-        );
+                          with open(
+                              NDWI_FILE,
+                              "wb"
+                          ) as dst:
 
-    }
+                              dst.write(
+                                  src.read()
+                              )
 
+                      ndwi_found = True
 
-    else if (
-        geometry.type ===
-        "MultiPolygon"
-    ) {
 
-        for (
-            const polygon
-            of geometry.coordinates
-        ) {
+              if not rgb_found:
 
-            drawPolygon(
-                polygon
-            );
+                  print(
+                      "RGB file was not found in ZIP."
+                  )
 
-        }
 
-    }
+              if not ndwi_found:
 
+                  print(
+                      "NDWI file was not found in ZIP."
+                  )
 
-    else {
 
-        throw new Error(
-            "نوع هندسه تالاب پشتیبانی نمی‌شود."
-        );
+          else:
 
-    }
+              print(
+                  "Unexpected response format."
+              )
 
+              print(
+                  response.text[:1000]
+              )
 
-    /*
-       اعمال ماسک به تصویر
-    */
+              raise Exception(
+                  "Unexpected Copernicus response"
+              )
 
-    ctx.globalCompositeOperation =
-        "destination-in";
 
+          # =====================================================
+          # ذخیره اطلاعات
+          # =====================================================
 
-    ctx.drawImage(
-        maskCanvas,
-        0,
-        0
-    );
+          os.makedirs(
+              "data",
+              exist_ok=True
+          )
 
 
-    /*
-       برگرداندن حالت عادی
-    */
+          info = {
 
-    ctx.globalCompositeOperation =
-        "source-over";
+              "updated_at":
+                  datetime.now(
+                      timezone.utc
+                  ).isoformat(),
 
+              "image":
+              {
 
-    /*
-       تبدیل Canvas به تصویر PNG
-    */
+                  "file":
+                      "data/maharlo_sentinel2.png",
 
-    return canvas.toDataURL(
-        "image/png"
-    );
+                  "bbox":
+                      bbox,
 
-}
+                  "type":
+                      "Sentinel-2 L2A",
 
+                  "max_cloud":
+                      20,
 
-/* =========================================================
-   شروع
-========================================================= */
+                  "period_days":
+                      30
 
-loadSite();
+              },
 
-</script>
+              "ndwi":
+              {
 
-</body>
-</html>
+                  "file":
+                      "data/maharlo_ndwi.png",
+
+                  "formula":
+                      "(B03 - B08) / (B03 + B08)",
+
+                  "green_band":
+                      "B03",
+
+                  "nir_band":
+                      "B08"
+
+              }
+
+          }
+
+
+          with open(
+              INFO_FILE,
+              "w",
+              encoding="utf-8"
+          ) as f:
+
+              json.dump(
+                  info,
+                  f,
+                  ensure_ascii=False,
+                  indent=2
+              )
+
+
+          print("")
+          print(
+              "=================================="
+          )
+          print(
+              "NDWI CREATED SUCCESSFULLY"
+          )
+          print(
+              "=================================="
+          )
+
+
+          PY
+
+
+      - name: Save files
+        run: |
+
+          git config user.name "github-actions"
+
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add \
+            data/maharlo_sentinel2.png \
+            data/maharlo_ndwi.png \
+            data/wetland-data.json
+
+          git diff --cached --quiet || \
+            git commit \
+            -m "Add NDWI for Maharloo wetland"
+
+          git push
