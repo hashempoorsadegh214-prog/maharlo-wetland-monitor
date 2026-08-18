@@ -22,9 +22,9 @@ jobs:
 
       - name: Install packages
         run: |
-          pip install requests
+          pip install requests pillow
 
-      - name: Download Sentinel-2 and calculate NDWI
+      - name: Download Sentinel-2 image
         env:
           CDSE_CLIENT_ID: ${{ secrets.CDSE_CLIENT_ID }}
           CDSE_CLIENT_SECRET: ${{ secrets.CDSE_CLIENT_SECRET }}
@@ -39,10 +39,21 @@ jobs:
 
           from datetime import datetime, timedelta, timezone
 
+
+          # =====================================================
+          # فایل‌ها
+          # =====================================================
+
           GEOJSON_FILE = "bestar_talab_maharlo.geojson"
+
           RGB_FILE = "data/maharlo_sentinel2.png"
-          NDWI_FILE = "data/maharlo_ndwi.png"
+
           INFO_FILE = "data/wetland-data.json"
+
+
+          # =====================================================
+          # خواندن مرز تالاب
+          # =====================================================
 
           with open(
               GEOJSON_FILE,
@@ -52,9 +63,16 @@ jobs:
 
               geojson = json.load(f)
 
+
           geometry = geojson["features"][0]["geometry"]
 
+
+          # =====================================================
+          # پیدا کردن BBOX
+          # =====================================================
+
           points = []
+
 
           def collect_points(obj):
 
@@ -74,9 +92,11 @@ jobs:
                   for item in obj:
                       collect_points(item)
 
+
           collect_points(
               geometry["coordinates"]
           )
+
 
           min_lon = min(
               p[0] for p in points
@@ -94,6 +114,7 @@ jobs:
               p[1] for p in points
           )
 
+
           bbox = [
               min_lon,
               min_lat,
@@ -101,13 +122,20 @@ jobs:
               max_lat
           ]
 
+
           print("Wetland BBOX:")
           print(bbox)
+
+
+          # =====================================================
+          # دریافت Access Token
+          # =====================================================
 
           token_url = (
               "https://identity.dataspace.copernicus.eu/"
               "auth/realms/CDSE/protocol/openid-connect/token"
           )
+
 
           token_data = {
 
@@ -122,11 +150,17 @@ jobs:
 
           }
 
+
           token_response = requests.post(
+
               token_url,
+
               data=token_data,
+
               timeout=60
+
           )
+
 
           if token_response.status_code != 200:
 
@@ -138,11 +172,22 @@ jobs:
                   "Copernicus authentication failed"
               )
 
+
           access_token = (
               token_response
               .json()
               ["access_token"]
           )
+
+
+          print(
+              "Copernicus authentication OK"
+          )
+
+
+          # =====================================================
+          # بازه زمانی
+          # =====================================================
 
           now = datetime.now(
               timezone.utc
@@ -152,6 +197,15 @@ jobs:
               now -
               timedelta(days=30)
           )
+
+
+          # =====================================================
+          # Evalscript تصویر طبیعی
+          #
+          # B04 = قرمز
+          # B03 = سبز
+          # B02 = آبی
+          # =====================================================
 
           evalscript = """
 
@@ -164,58 +218,49 @@ jobs:
                   input: [
                       "B02",
                       "B03",
-                      "B04",
-                      "B08"
+                      "B04"
                   ],
 
-                  output: [
+                  output: {
 
-                      {
-                          id: "rgb",
-                          bands: 3,
-                          sampleType: "AUTO"
-                      },
+                      bands: 3,
 
-                      {
-                          id: "ndwi",
-                          bands: 1,
-                          sampleType: "FLOAT32"
-                      }
+                      sampleType:
+                          "AUTO"
 
-                  ]
+                  }
 
               };
 
           }
 
+
           function evaluatePixel(sample) {
 
-              let ndwi =
-                  (sample.B03 - sample.B08) /
-                  (sample.B03 + sample.B08);
+              return [
 
-              return {
+                  2.5 * sample.B04,
 
-                  rgb: [
-                      2.5 * sample.B04,
-                      2.5 * sample.B03,
-                      2.5 * sample.B02
-                  ],
+                  2.5 * sample.B03,
 
-                  ndwi: [
-                      ndwi
-                  ]
+                  2.5 * sample.B02
 
-              };
+              ];
 
           }
 
           """
 
+
+          # =====================================================
+          # درخواست تصویر
+          # =====================================================
+
           process_url = (
               "https://sh.dataspace.copernicus.eu/"
               "process/v1"
           )
+
 
           request_body = {
 
@@ -268,6 +313,7 @@ jobs:
 
               },
 
+
               "output": {
 
                   "width":
@@ -281,26 +327,12 @@ jobs:
                       {
 
                           "identifier":
-                              "rgb",
+                              "default",
 
                           "format": {
 
                               "type":
                                   "image/png"
-
-                          }
-
-                      },
-
-                      {
-
-                          "identifier":
-                              "ndwi",
-
-                          "format": {
-
-                              "type":
-                                  "image/tiff"
 
                           }
 
@@ -310,10 +342,12 @@ jobs:
 
               },
 
+
               "evalscript":
                   evalscript
 
           }
+
 
           headers = {
 
@@ -326,21 +360,38 @@ jobs:
 
           }
 
+
           print(
-              "Requesting Sentinel-2..."
+              "Downloading Sentinel-2 image..."
           )
 
+
           response = requests.post(
+
               process_url,
+
               headers=headers,
+
               json=request_body,
+
               timeout=300
+
           )
+
 
           print(
               "HTTP:",
               response.status_code
           )
+
+          print(
+              "Content-Type:",
+              response.headers.get(
+                  "Content-Type",
+                  ""
+              )
+          )
+
 
           if response.status_code != 200:
 
@@ -352,110 +403,47 @@ jobs:
                   "Sentinel-2 request failed"
               )
 
-          content_type = response.headers.get(
+
+          # =====================================================
+          # ذخیره مستقیم PNG
+          # =====================================================
+
+          if not response.headers.get(
               "Content-Type",
               ""
-          )
-
-          print(
-              "Content-Type:",
-              content_type
-          )
-
-          if "zip" in content_type.lower():
-
-              import zipfile
-              import io
-
-              z = zipfile.ZipFile(
-                  io.BytesIO(
-                      response.content
-                  )
-              )
-
-              print(
-                  "ZIP FILES:",
-                  z.namelist()
-              )
-
-              os.makedirs(
-                  "data",
-                  exist_ok=True
-              )
-
-              rgb_found = False
-              ndwi_found = False
-
-              for name in z.namelist():
-
-                  lower = name.lower()
-
-                  if (
-                      lower.endswith(".png")
-                      and "rgb" in lower
-                  ):
-
-                      with z.open(name) as src:
-
-                          with open(
-                              RGB_FILE,
-                              "wb"
-                          ) as dst:
-
-                              dst.write(
-                                  src.read()
-                              )
-
-                      rgb_found = True
-
-                  elif (
-                      lower.endswith(".tif")
-                      or lower.endswith(".tiff")
-                  ):
-
-                      with z.open(name) as src:
-
-                          with open(
-                              NDWI_FILE,
-                              "wb"
-                          ) as dst:
-
-                              dst.write(
-                                  src.read()
-                              )
-
-                      ndwi_found = True
-
-              if not rgb_found:
-
-                  print(
-                      "RGB file was not found in ZIP."
-                  )
-
-              if not ndwi_found:
-
-                  print(
-                      "NDWI file was not found in ZIP."
-                  )
-
-          else:
-
-              print(
-                  "Unexpected response format."
-              )
-
-              print(
-                  response.text[:1000]
-              )
+          ).lower().startswith(
+              "image/png"
+          ):
 
               raise Exception(
-                  "Unexpected Copernicus response"
+                  "Copernicus did not return PNG image."
               )
+
 
           os.makedirs(
               "data",
               exist_ok=True
           )
+
+
+          with open(
+              RGB_FILE,
+              "wb"
+          ) as f:
+
+              f.write(
+                  response.content
+              )
+
+
+          print(
+              "Sentinel-2 PNG saved."
+          )
+
+
+          # =====================================================
+          # ذخیره اطلاعات
+          # =====================================================
 
           info = {
 
@@ -480,28 +468,19 @@ jobs:
                       20,
 
                   "period_days":
-                      30
+                      30,
 
-              },
-
-              "ndwi":
-              {
-
-                  "file":
-                      "data/maharlo_ndwi.png",
-
-                  "formula":
-                      "(B03 - B08) / (B03 + B08)",
-
-                  "green_band":
-                      "B03",
-
-                  "nir_band":
-                      "B08"
+                  "bands":
+                      [
+                          "B04",
+                          "B03",
+                          "B02"
+                      ]
 
               }
 
           }
+
 
           with open(
               INFO_FILE,
@@ -516,11 +495,20 @@ jobs:
                   indent=2
               )
 
+
+          print("")
           print(
-              "NDWI CREATED SUCCESSFULLY"
+              "======================================"
+          )
+          print(
+              "SENTINEL-2 IMAGE CREATED SUCCESSFULLY"
+          )
+          print(
+              "======================================"
           )
 
           PY
+
 
       - name: Save files
         run: |
@@ -532,11 +520,10 @@ jobs:
 
           git add \
             data/maharlo_sentinel2.png \
-            data/maharlo_ndwi.png \
             data/wetland-data.json
 
           git diff --cached --quiet || \
             git commit \
-            -m "Add NDWI for Maharloo wetland"
+            -m "Update Maharloo Sentinel-2 image"
 
           git push
