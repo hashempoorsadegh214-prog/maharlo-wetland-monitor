@@ -21,9 +21,9 @@ jobs:
 
       - name: Install packages
         run: |
-          pip install requests
+          pip install requests pillow shapely pyproj
 
-      - name: Download RGB and Water
+      - name: Download image and calculate water area
         env:
           CDSE_CLIENT_ID: ${{ secrets.CDSE_CLIENT_ID }}
           CDSE_CLIENT_SECRET: ${{ secrets.CDSE_CLIENT_SECRET }}
@@ -38,6 +38,16 @@ jobs:
 
           from datetime import datetime, timedelta, timezone
 
+          from PIL import Image
+
+          from shapely.geometry import shape
+
+          from pyproj import Transformer
+
+
+          # =====================================================
+          # فایل‌ها
+          # =====================================================
 
           GEOJSON_FILE = "bestar_talab_maharlo.geojson"
 
@@ -49,7 +59,27 @@ jobs:
 
 
           # =====================================================
-          # خواندن مرز
+          # پارامترها
+          # =====================================================
+
+          MAX_CLOUD = 20
+
+          DAYS_BACK = 30
+
+          PIXEL_SIZE_M = 20
+
+          PIXEL_AREA_M2 = (
+              PIXEL_SIZE_M *
+              PIXEL_SIZE_M
+          )
+
+          PIXEL_AREA_HA = (
+              PIXEL_AREA_M2 / 10000
+          )
+
+
+          # =====================================================
+          # خواندن مرز تالاب
           # =====================================================
 
           with open(
@@ -63,51 +93,89 @@ jobs:
 
           geometry = geojson["features"][0]["geometry"]
 
-          points = []
+          wetland = shape(
+              geometry
+          ).buffer(0)
 
 
-          def collect_points(obj):
+          # =====================================================
+          # تبدیل WGS84 به UTM Zone 39N
+          #
+          # مهارلو در این محدوده قرار دارد.
+          # =====================================================
 
-              if (
-                  isinstance(obj, list)
-                  and len(obj) >= 2
-                  and isinstance(obj[0], (int, float))
-                  and isinstance(obj[1], (int, float))
-              ):
-
-                  points.append(
-                      (obj[0], obj[1])
-                  )
-
-              elif isinstance(obj, list):
-
-                  for item in obj:
-                      collect_points(item)
+          to_utm = Transformer.from_crs(
+              "EPSG:4326",
+              "EPSG:32639",
+              always_xy=True
+          ).transform
 
 
-          collect_points(
-              geometry["coordinates"]
+          wetland_utm = (
+              __import__("shapely").ops.transform(
+                  to_utm,
+                  wetland
+              )
           )
 
 
-          min_lon = min(
-              p[0] for p in points
-          )
-
-          max_lon = max(
-              p[0] for p in points
-          )
-
-          min_lat = min(
-              p[1] for p in points
-          )
-
-          max_lat = max(
-              p[1] for p in points
+          minx, miny, maxx, maxy = (
+              wetland_utm.bounds
           )
 
 
-          bbox = [
+          # عرض و ارتفاع بر حسب متر
+
+          width_m = maxx - minx
+
+          height_m = maxy - miny
+
+
+          # تعداد پیکسل‌ها با اندازه 20 متر
+
+          width_px = int(
+              round(
+                  width_m /
+                  PIXEL_SIZE_M
+              )
+          )
+
+          height_px = int(
+              round(
+                  height_m /
+                  PIXEL_SIZE_M
+              )
+          )
+
+
+          print(
+              "UTM width:",
+              width_m
+          )
+
+          print(
+              "UTM height:",
+              height_m
+          )
+
+          print(
+              "Output size:",
+              width_px,
+              "x",
+              height_px
+          )
+
+
+          # =====================================================
+          # BBOX جغرافیایی برای RGB
+          # =====================================================
+
+          min_lon, min_lat, max_lon, max_lat = (
+              wetland.bounds
+          )
+
+
+          rgb_bbox = [
               min_lon,
               min_lat,
               max_lon,
@@ -115,11 +183,8 @@ jobs:
           ]
 
 
-          print("BBOX:", bbox)
-
-
           # =====================================================
-          # Token
+          # گرفتن Token
           # =====================================================
 
           token_url = (
@@ -154,14 +219,19 @@ jobs:
               )
 
               raise Exception(
-                  "Authentication failed"
+                  "Copernicus authentication failed"
               )
 
 
-          token = (
+          access_token = (
               token_response
               .json()
               ["access_token"]
+          )
+
+
+          print(
+              "Copernicus authentication OK"
           )
 
 
@@ -175,7 +245,9 @@ jobs:
 
           start = (
               now -
-              timedelta(days=30)
+              timedelta(
+                  days=DAYS_BACK
+              )
           )
 
 
@@ -188,11 +260,11 @@ jobs:
           headers = {
 
               "Authorization":
-                  "Bearer " + token,
+                  "Bearer " +
+                  access_token,
 
               "Content-Type":
                   "application/json"
-
           }
 
 
@@ -218,7 +290,8 @@ jobs:
 
                       bands: 3,
 
-                      sampleType: "AUTO"
+                      sampleType:
+                          "AUTO"
 
                   }
 
@@ -257,7 +330,8 @@ jobs:
 
                       },
 
-                      "bbox": bbox
+                      "bbox":
+                          rgb_bbox
 
                   },
 
@@ -281,7 +355,7 @@ jobs:
                               },
 
                               "maxCloudCoverage":
-                                  20,
+                                  MAX_CLOUD,
 
                               "mosaickingOrder":
                                   "leastCC"
@@ -296,8 +370,11 @@ jobs:
 
               "output": {
 
-                  "width": 1200,
-                  "height": 1200,
+                  "width":
+                      1200,
+
+                  "height":
+                      1200,
 
                   "responses": [
 
@@ -321,7 +398,6 @@ jobs:
 
               "evalscript":
                   rgb_evalscript
-
           }
 
 
@@ -340,7 +416,7 @@ jobs:
           if rgb_response.status_code != 200:
 
               print(
-                  rgb_response.text[:2000]
+                  rgb_response.text[:3000]
               )
 
               raise Exception(
@@ -365,12 +441,14 @@ jobs:
 
 
           print(
-              "RGB saved"
+              "RGB image saved."
           )
 
 
           # =====================================================
           # MNDWI + AWEI
+          #
+          # خروجی در UTM و 20 متر
           # =====================================================
 
           water_evalscript = """
@@ -409,29 +487,23 @@ jobs:
 
 
               let awei =
-                  4 * (sample.B03 - sample.B11) -
+                  4 * (
+                      sample.B03 -
+                      sample.B11
+                  ) -
                   (
-                      0.25 * sample.B08 +
-                      2.75 * sample.B12
+                      0.25 *
+                      sample.B08
+                      +
+                      2.75 *
+                      sample.B12
                   );
 
 
-              /*
-                 فرمول شما
-              */
-
-              let isWater =
-                  (
-                      awei > -0.1 &&
-                      mndwi > 0
-                  );
-
-
-              if (isWater) {
-
-                  /*
-                     آب = آبی پررنگ
-                  */
+              if (
+                  awei > -0.1 &&
+                  mndwi > 0
+              ) {
 
                   return [
                       0.0,
@@ -442,10 +514,6 @@ jobs:
 
               }
 
-
-              /*
-                 غیرآب = شفاف
-              */
 
               return [
                   0.0,
@@ -468,11 +536,18 @@ jobs:
                       "properties": {
 
                           "crs":
-                          "http://www.opengis.net/def/crs/OGC/1.3/CRS84"
+                          "http://www.opengis.net/def/crs/EPSG/0/32639"
 
                       },
 
-                      "bbox": bbox
+                      "bbox": [
+
+                          minx,
+                          miny,
+                          maxx,
+                          maxy
+
+                      ]
 
                   },
 
@@ -496,7 +571,7 @@ jobs:
                               },
 
                               "maxCloudCoverage":
-                                  20,
+                                  MAX_CLOUD,
 
                               "mosaickingOrder":
                                   "leastCC"
@@ -511,8 +586,11 @@ jobs:
 
               "output": {
 
-                  "width": 1200,
-                  "height": 1200,
+                  "width":
+                      width_px,
+
+                  "height":
+                      height_px,
 
                   "responses": [
 
@@ -536,8 +614,12 @@ jobs:
 
               "evalscript":
                   water_evalscript
-
           }
+
+
+          print(
+              "Calculating water layer..."
+          )
 
 
           water_response = requests.post(
@@ -553,7 +635,7 @@ jobs:
 
 
           print(
-              "WATER HTTP:",
+              "Water HTTP:",
               water_response.status_code
           )
 
@@ -580,12 +662,84 @@ jobs:
 
 
           print(
-              "Water layer saved"
+              "Water image saved."
           )
 
 
           # =====================================================
-          # JSON
+          # شمارش پیکسل‌های آب
+          #
+          # PNG چهار کاناله است:
+          # RGB + Alpha
+          #
+          # Alpha > 0 یعنی آب تشخیص داده شده
+          # =====================================================
+
+          image = Image.open(
+              WATER_FILE
+          ).convert("RGBA")
+
+
+          pixels = image.load()
+
+
+          water_pixels = 0
+
+          total_pixels = (
+              image.width *
+              image.height
+          )
+
+
+          for y in range(
+              image.height
+          ):
+
+              for x in range(
+                  image.width
+              ):
+
+                  alpha = pixels[x, y][3]
+
+                  if alpha > 0:
+
+                      water_pixels += 1
+
+
+          # =====================================================
+          # محاسبه مساحت
+          # =====================================================
+
+          water_area_m2 = (
+              water_pixels *
+              PIXEL_AREA_M2
+          )
+
+
+          water_area_ha = (
+              water_area_m2 /
+              10000
+          )
+
+
+          print(
+              "Water pixels:",
+              water_pixels
+          )
+
+          print(
+              "Water area m2:",
+              water_area_m2
+          )
+
+          print(
+              "Water area ha:",
+              water_area_ha
+          )
+
+
+          # =====================================================
+          # ذخیره اطلاعات
           # =====================================================
 
           info = {
@@ -601,14 +755,16 @@ jobs:
                       "data/maharlo_sentinel2.png",
 
                   "bbox":
-                      bbox,
+                      rgb_bbox,
 
                   "type":
                       "Sentinel-2 L2A",
 
                   "max_cloud":
-                      20
+                      MAX_CLOUD,
 
+                  "period_days":
+                      DAYS_BACK
               },
 
               "water": {
@@ -626,7 +782,25 @@ jobs:
                       "4*(B03-B11) - (0.25*B08 + 2.75*B12)",
 
                   "condition":
-                      "AWEI > -0.1 AND MNDWI > 0"
+                      "AWEI > -0.1 AND MNDWI > 0",
+
+                  "pixel_size_m":
+                      PIXEL_SIZE_M,
+
+                  "pixel_area_ha":
+                      PIXEL_AREA_HA,
+
+                  "water_pixels":
+                      water_pixels,
+
+                  "water_area_m2":
+                      water_area_m2,
+
+                  "water_area_ha":
+                      round(
+                          water_area_ha,
+                          2
+                      )
 
               }
 
@@ -647,8 +821,26 @@ jobs:
               )
 
 
+          print("")
           print(
-              "DONE"
+              "======================================"
+          )
+
+          print(
+              "WATER AREA CALCULATED"
+          )
+
+          print(
+              "Area:",
+              round(
+                  water_area_ha,
+                  2
+              ),
+              "hectares"
+          )
+
+          print(
+              "======================================"
           )
 
           PY
@@ -669,6 +861,6 @@ jobs:
 
           git diff --cached --quiet || \
             git commit \
-            -m "Update Maharloo water detection"
+            -m "Calculate Maharloo water area"
 
           git push
