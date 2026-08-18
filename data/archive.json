@@ -1,0 +1,116 @@
+{
+  "updated_at": "2026-08-18T23:59:18.168022+00:00",
+  "period_days": 30,
+  "max_cloud": 20,
+  "available_days": 12,
+  "items": [
+    {
+      "date": "2026-08-18",
+      "datetime": "2026-08-18T06:56:21.025000Z",
+      "cloud_cover": 0.0,
+      "image": "archive/rgb_2026-08-18.png",
+      "water_image": "archive/water_2026-08-18.png",
+      "water_pixels": 0,
+      "water_area_ha": 0.0
+    },
+    {
+      "date": "2026-08-16",
+      "datetime": "2026-08-16T07:06:19.024000Z",
+      "cloud_cover": 16.95,
+      "image": "archive/rgb_2026-08-16.png",
+      "water_image": "archive/water_2026-08-16.png",
+      "water_pixels": 249262,
+      "water_area_ha": 9970.48
+    },
+    {
+      "date": "2026-08-13",
+      "datetime": "2026-08-13T07:13:21.024000Z",
+      "cloud_cover": 14.74,
+      "image": "archive/rgb_2026-08-13.png",
+      "water_image": "archive/water_2026-08-13.png",
+      "water_pixels": 327390,
+      "water_area_ha": 13095.6
+    },
+    {
+      "date": "2026-08-11",
+      "datetime": "2026-08-11T07:06:21.025000Z",
+      "cloud_cover": 1.47,
+      "image": "archive/rgb_2026-08-11.png",
+      "water_image": "archive/water_2026-08-11.png",
+      "water_pixels": 328721,
+      "water_area_ha": 13148.84
+    },
+    {
+      "date": "2026-08-08",
+      "datetime": "2026-08-08T06:56:21.025000Z",
+      "cloud_cover": 0.01,
+      "image": "archive/rgb_2026-08-08.png",
+      "water_image": "archive/water_2026-08-08.png",
+      "water_pixels": 0,
+      "water_area_ha": 0.0
+    },
+    {
+      "date": "2026-08-06",
+      "datetime": "2026-08-06T07:06:19.024000Z",
+      "cloud_cover": 15.99,
+      "image": "archive/rgb_2026-08-06.png",
+      "water_image": "archive/water_2026-08-06.png",
+      "water_pixels": 265077,
+      "water_area_ha": 10603.08
+    },
+    {
+      "date": "2026-08-03",
+      "datetime": "2026-08-03T06:56:19.024000Z",
+      "cloud_cover": 0.35,
+      "image": "archive/rgb_2026-08-03.png",
+      "water_image": "archive/water_2026-08-03.png",
+      "water_pixels": 299491,
+      "water_area_ha": 11979.64
+    },
+    {
+      "date": "2026-08-01",
+      "datetime": "2026-08-01T07:06:21.025000Z",
+      "cloud_cover": 0.02,
+      "image": "archive/rgb_2026-08-01.png",
+      "water_image": "archive/water_2026-08-01.png",
+      "water_pixels": 306524,
+      "water_area_ha": 12260.96
+    },
+    {
+      "date": "2026-07-31",
+      "datetime": "2026-07-31T07:03:21.024000Z",
+      "cloud_cover": 0.01,
+      "image": "archive/rgb_2026-07-31.png",
+      "water_image": "archive/water_2026-07-31.png",
+      "water_pixels": 0,
+      "water_area_ha": 0.0
+    },
+    {
+      "date": "2026-07-29",
+      "datetime": "2026-07-29T06:56:21.025000Z",
+      "cloud_cover": 1.0,
+      "image": "archive/rgb_2026-07-29.png",
+      "water_image": "archive/water_2026-07-29.png",
+      "water_pixels": 0,
+      "water_area_ha": 0.0
+    },
+    {
+      "date": "2026-07-24",
+      "datetime": "2026-07-24T06:56:19.024000Z",
+      "cloud_cover": 0.0,
+      "image": "archive/rgb_2026-07-24.png",
+      "water_image": "archive/water_2026-07-24.png",
+      "water_pixels": 338746,
+      "water_area_ha": 13549.84
+    },
+    {
+      "date": "2026-07-22",
+      "datetime": "2026-07-22T07:06:21.025000Z",
+      "cloud_cover": 0.02,
+      "image": "archive/rgb_2026-07-22.png",
+      "water_image": "archive/water_2026-07-22.png",
+      "water_pixels": 338090,
+      "water_area_ha": 13523.6
+    }
+  ]
+}
