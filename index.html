@@ -1,10 +1,95 @@
 <!DOCTYPE html>
-<html>
+<html lang="fa" dir="rtl">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>سامانه پایش تالاب مهارلو</title>
+
+    <link
+        rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: Tahoma, Arial, sans-serif;
+            background: #f5f7fa;
+        }
+
+        header {
+            height: 60px;
+            background: #f28c28;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+            font-weight: bold;
+        }
+
+        #map {
+            width: 100%;
+            height: calc(100vh - 60px);
+        }
+    </style>
 </head>
+
 <body>
-    <h1>سامانه پایش تالاب مهارلو</h1>
+
+<header>
+    سامانه پایش تالاب مهارلو
+</header>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+    const map = L.map('map').setView([29.43, 52.82], 10);
+
+    L.tileLayer(
+        'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+        {
+            attribution: '&copy; OpenStreetMap contributors'
+        }
+    ).addTo(map);
+
+    fetch('bestar_talab_maharlo.geojson')
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('فایل GeoJSON پیدا نشد');
+            }
+            return response.json();
+        })
+        .then(data => {
+
+            const wetland = L.geoJSON(data, {
+                style: {
+                    color: '#0066ff',
+                    weight: 3,
+                    fillColor: '#00aaff',
+                    fillOpacity: 0.25
+                }
+            }).addTo(map);
+
+            const bounds = wetland.getBounds();
+
+            if (bounds.isValid()) {
+                map.fitBounds(bounds, {
+                    padding: [20, 20]
+                });
+            }
+        })
+        .catch(error => {
+            console.error(error);
+            alert('خطا در بارگذاری مرز تالاب');
+        });
+</script>
+
 </body>
 </html>
