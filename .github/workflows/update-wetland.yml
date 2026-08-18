@@ -7,7 +7,6 @@ on:
 
 jobs:
   update-wetland:
-
     runs-on: ubuntu-latest
 
     steps:
@@ -24,7 +23,7 @@ jobs:
         run: |
           pip install requests
 
-      - name: Download Sentinel-2 RGB
+      - name: Download RGB and Water
         env:
           CDSE_CLIENT_ID: ${{ secrets.CDSE_CLIENT_ID }}
           CDSE_CLIENT_SECRET: ${{ secrets.CDSE_CLIENT_SECRET }}
@@ -40,10 +39,6 @@ jobs:
           from datetime import datetime, timedelta, timezone
 
 
-          # =====================================================
-          # فایل‌ها
-          # =====================================================
-
           GEOJSON_FILE = "bestar_talab_maharlo.geojson"
 
           RGB_FILE = "data/maharlo_sentinel2.png"
@@ -54,7 +49,7 @@ jobs:
 
 
           # =====================================================
-          # خواندن مرز تالاب
+          # خواندن مرز
           # =====================================================
 
           with open(
@@ -67,11 +62,6 @@ jobs:
 
 
           geometry = geojson["features"][0]["geometry"]
-
-
-          # =====================================================
-          # پیدا کردن BBOX
-          # =====================================================
 
           points = []
 
@@ -125,12 +115,11 @@ jobs:
           ]
 
 
-          print("Wetland BBOX:")
-          print(bbox)
+          print("BBOX:", bbox)
 
 
           # =====================================================
-          # دریافت توکن Copernicus
+          # Token
           # =====================================================
 
           token_url = (
@@ -139,23 +128,21 @@ jobs:
           )
 
 
-          token_data = {
-
-              "grant_type":
-                  "client_credentials",
-
-              "client_id":
-                  os.environ["CDSE_CLIENT_ID"],
-
-              "client_secret":
-                  os.environ["CDSE_CLIENT_SECRET"]
-
-          }
-
-
           token_response = requests.post(
+
               token_url,
-              data=token_data,
+
+              data={
+                  "grant_type":
+                      "client_credentials",
+
+                  "client_id":
+                      os.environ["CDSE_CLIENT_ID"],
+
+                  "client_secret":
+                      os.environ["CDSE_CLIENT_SECRET"]
+              },
+
               timeout=60
           )
 
@@ -167,24 +154,19 @@ jobs:
               )
 
               raise Exception(
-                  "Copernicus authentication failed"
+                  "Authentication failed"
               )
 
 
-          access_token = (
+          token = (
               token_response
               .json()
               ["access_token"]
           )
 
 
-          print(
-              "Copernicus authentication OK"
-          )
-
-
           # =====================================================
-          # بازه زمانی
+          # زمان
           # =====================================================
 
           now = datetime.now(
@@ -197,10 +179,6 @@ jobs:
           )
 
 
-          # =====================================================
-          # آدرس Process API
-          # =====================================================
-
           process_url = (
               "https://sh.dataspace.copernicus.eu/"
               "process/v1"
@@ -210,8 +188,7 @@ jobs:
           headers = {
 
               "Authorization":
-                  "Bearer " +
-                  access_token,
+                  "Bearer " + token,
 
               "Content-Type":
                   "application/json"
@@ -220,7 +197,7 @@ jobs:
 
 
           # =====================================================
-          # تصویر RGB
+          # RGB
           # =====================================================
 
           rgb_evalscript = """
@@ -238,8 +215,11 @@ jobs:
                   ],
 
                   output: {
+
                       bands: 3,
+
                       sampleType: "AUTO"
+
                   }
 
               };
@@ -277,8 +257,7 @@ jobs:
 
                       },
 
-                      "bbox":
-                          bbox
+                      "bbox": bbox
 
                   },
 
@@ -317,11 +296,8 @@ jobs:
 
               "output": {
 
-                  "width":
-                      1200,
-
-                  "height":
-                      1200,
+                  "width": 1200,
+                  "height": 1200,
 
                   "responses": [
 
@@ -349,29 +325,22 @@ jobs:
           }
 
 
-          print(
-              "Downloading Sentinel-2 RGB..."
-          )
-
-
           rgb_response = requests.post(
+
               process_url,
+
               headers=headers,
+
               json=rgb_request,
+
               timeout=300
-          )
-
-
-          print(
-              "RGB HTTP:",
-              rgb_response.status_code
           )
 
 
           if rgb_response.status_code != 200:
 
               print(
-                  rgb_response.text[:3000]
+                  rgb_response.text[:2000]
               )
 
               raise Exception(
@@ -396,7 +365,7 @@ jobs:
 
 
           print(
-              "RGB image saved."
+              "RGB saved"
           )
 
 
@@ -448,59 +417,41 @@ jobs:
 
 
               /*
-                 شرط تشخیص آب
+                 فرمول شما
               */
 
-              if (
-                  awei > -0.1 &&
-                  mndwi > 0
-              ) {
+              let isWater =
+                  (
+                      awei > -0.1 &&
+                      mndwi > 0
+                  );
+
+
+              if (isWater) {
 
                   /*
-                     شدت نمایش براساس MNDWI
-                  */
-
-                  let intensity =
-                      Math.min(
-                          Math.max(
-                              mndwi * 1.5,
-                              0
-                          ),
-                          1
-                      );
-
-
-                  /*
-                     آبی
-                     و شفافیت متغیر
+                     آب = آبی پررنگ
                   */
 
                   return [
-
-                      0,
-
-                      1 - intensity,
-
-                      0.5 +
-                      (intensity * 0.5),
-
-                      0.35 +
-                      (intensity * 0.65)
-
+                      0.0,
+                      0.25,
+                      1.0,
+                      1.0
                   ];
 
               }
 
 
               /*
-                 خارج از آب = کاملاً شفاف
+                 غیرآب = شفاف
               */
 
               return [
-                  0,
-                  0,
-                  0,
-                  0
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
               ];
 
           }
@@ -521,8 +472,7 @@ jobs:
 
                       },
 
-                      "bbox":
-                          bbox
+                      "bbox": bbox
 
                   },
 
@@ -561,11 +511,8 @@ jobs:
 
               "output": {
 
-                  "width":
-                      1200,
-
-                  "height":
-                      1200,
+                  "width": 1200,
+                  "height": 1200,
 
                   "responses": [
 
@@ -593,15 +540,14 @@ jobs:
           }
 
 
-          print(
-              "Calculating MNDWI + AWEI water layer..."
-          )
-
-
           water_response = requests.post(
+
               process_url,
+
               headers=headers,
+
               json=water_request,
+
               timeout=300
           )
 
@@ -619,7 +565,7 @@ jobs:
               )
 
               raise Exception(
-                  "Water layer request failed"
+                  "Water request failed"
               )
 
 
@@ -634,12 +580,12 @@ jobs:
 
 
           print(
-              "Water layer saved."
+              "Water layer saved"
           )
 
 
           # =====================================================
-          # اطلاعات
+          # JSON
           # =====================================================
 
           info = {
@@ -649,8 +595,7 @@ jobs:
                       timezone.utc
                   ).isoformat(),
 
-              "image":
-              {
+              "image": {
 
                   "file":
                       "data/maharlo_sentinel2.png",
@@ -662,15 +607,11 @@ jobs:
                       "Sentinel-2 L2A",
 
                   "max_cloud":
-                      20,
-
-                  "period_days":
-                      30
+                      20
 
               },
 
-              "water":
-              {
+              "water": {
 
                   "file":
                       "data/maharlo_water.png",
@@ -678,10 +619,10 @@ jobs:
                   "method":
                       "MNDWI + AWEI",
 
-                  "mndwi_formula":
+                  "mndwi":
                       "(B03 - B11) / (B03 + B11)",
 
-                  "awei_formula":
+                  "awei":
                       "4*(B03-B11) - (0.25*B08 + 2.75*B12)",
 
                   "condition":
@@ -706,16 +647,8 @@ jobs:
               )
 
 
-          print("")
           print(
-              "======================================"
-          )
-          print(
-              "MNDWI + AWEI WATER LAYER CREATED"
-          )
-          print(
-              "======================================"
-
+              "DONE"
           )
 
           PY
@@ -736,6 +669,6 @@ jobs:
 
           git diff --cached --quiet || \
             git commit \
-            -m "Add MNDWI AWEI water layer"
+            -m "Update Maharloo water detection"
 
           git push
