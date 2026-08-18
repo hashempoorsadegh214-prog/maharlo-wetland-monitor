@@ -1,37 +1,585 @@
-name: Test Copernicus Login
+name: Update Wetland Sentinel-2
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"
 
 jobs:
-  test-copernicus:
+  update-wetland:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Test login
+
+      - name: Get repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install packages
+        run: |
+          pip install requests shapely
+
+      - name: Find Sentinel-2 image
         env:
           CDSE_USERNAME: ${{ secrets.CDSE_USERNAME }}
           CDSE_PASSWORD: ${{ secrets.CDSE_PASSWORD }}
+
         run: |
+
           python - <<'PY'
+
           import os
+          import json
           import requests
 
-          url = "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token"
+          from datetime import datetime, timedelta, timezone
+          from shapely.geometry import shape
+          from shapely.ops import transform
 
-          data = {
-              "client_id": "cdse-public",
-              "username": os.environ["CDSE_USERNAME"],
-              "password": os.environ["CDSE_PASSWORD"],
-              "grant_type": "password"
+
+          # ==========================================
+          # فایل مرز تالاب
+          # ==========================================
+
+          GEOJSON_FILE = "bestar_talab_maharlo.geojson"
+
+
+          # ==========================================
+          # فایل خروجی
+          # ==========================================
+
+          OUTPUT_FILE = "data/wetland-data.json"
+
+
+          # ==========================================
+          # تنظیمات
+          # ==========================================
+
+          MAX_CLOUD = 20
+          DAYS_BACK = 30
+
+
+          # ==========================================
+          # آدرس Copernicus
+          # ==========================================
+
+          TOKEN_URL = (
+              "https://identity.dataspace.copernicus.eu/"
+              "auth/realms/CDSE/protocol/openid-connect/token"
+          )
+
+          CATALOG_URL = (
+              "https://catalogue.dataspace.copernicus.eu/"
+              "odata/v1/Products"
+          )
+
+
+          # ==========================================
+          # خواندن GeoJSON
+          # ==========================================
+
+          with open(
+              GEOJSON_FILE,
+              "r",
+              encoding="utf-8"
+          ) as f:
+
+              geojson = json.load(f)
+
+
+          feature = geojson["features"][0]
+
+          geometry = feature["geometry"]
+
+
+          # ==========================================
+          # حذف ارتفاع Z
+          # ==========================================
+
+          def remove_z(x):
+
+              if isinstance(x, (list, tuple)):
+
+                  if (
+                      len(x) >= 2
+                      and isinstance(x[0], (int, float))
+                      and isinstance(x[1], (int, float))
+                  ):
+
+                      return [
+                          x[0],
+                          x[1]
+                      ]
+
+                  return [
+                      remove_z(i)
+                      for i in x
+                  ]
+
+              return x
+
+
+          geometry_2d = {
+              "type": geometry["type"],
+              "coordinates": remove_z(
+                  geometry["coordinates"]
+              )
           }
 
-          response = requests.post(
-              url,
-              data=data,
+
+          # ==========================================
+          # تبدیل به WKT
+          # ==========================================
+
+          polygon = shape(geometry_2d)
+
+          polygon = polygon.buffer(0)
+
+          wkt = polygon.wkt
+
+
+          # ==========================================
+          # گرفتن Access Token
+          # ==========================================
+
+          token_data = {
+
+              "client_id": "cdse-public",
+
+              "username":
+                  os.environ["CDSE_USERNAME"],
+
+              "password":
+                  os.environ["CDSE_PASSWORD"],
+
+              "grant_type":
+                  "password"
+          }
+
+
+          token_response = requests.post(
+
+              TOKEN_URL,
+
+              data=token_data,
+
               timeout=60
           )
 
-          print("HTTP STATUS:", response.status_code)
-          print("RESPONSE:", response.text[:1000])
+
+          token_response.raise_for_status()
+
+
+          access_token = (
+              token_response
+              .json()
+              ["access_token"]
+          )
+
+
+          # ==========================================
+          # تاریخ جست‌وجو
+          # ==========================================
+
+          now = datetime.now(
+              timezone.utc
+          )
+
+          start = (
+              now -
+              timedelta(
+                  days=DAYS_BACK
+              )
+          )
+
+
+          start_date = (
+              start.strftime(
+                  "%Y-%m-%dT%H:%M:%S.000Z"
+              )
+          )
+
+          end_date = (
+              now.strftime(
+                  "%Y-%m-%dT%H:%M:%S.000Z"
+              )
+          )
+
+
+          # ==========================================
+          # ساخت فیلتر Copernicus
+          # ==========================================
+
+          filters = [
+
+              "Collection/Name eq 'SENTINEL-2'",
+
+              (
+                  "Attributes/OData.CSC.StringAttribute/"
+                  "any(att:att/Name eq 'productType' "
+                  "and att/OData.CSC.StringAttribute/"
+                  "Value eq 'S2MSI2A')"
+              ),
+
+              (
+                  "OData.CSC.Intersects("
+                  "area=geography'SRID=4326;"
+                  f"{wkt}')"
+              ),
+
+              (
+                  "Attributes/OData.CSC.DoubleAttribute/"
+                  "any(att:att/Name eq 'cloudCover' "
+                  f"and att/OData.CSC.DoubleAttribute/"
+                  f"Value le {MAX_CLOUD})"
+              ),
+
+              (
+                  f"ContentDate/Start ge {start_date}"
+              ),
+
+              (
+                  f"ContentDate/Start le {end_date}"
+              )
+
+          ]
+
+
+          filter_string = " and ".join(
+              filters
+          )
+
+
+          params = {
+
+              "$filter":
+                  filter_string,
+
+              "$orderby":
+                  "ContentDate/Start desc",
+
+              "$top":
+                  "50"
+          }
+
+
+          headers = {
+
+              "Authorization":
+                  f"Bearer {access_token}"
+          }
+
+
+          # ==========================================
+          # ارسال درخواست
+          # ==========================================
+
+          response = requests.get(
+
+              CATALOG_URL,
+
+              params=params,
+
+              headers=headers,
+
+              timeout=120
+          )
+
+
+          response.raise_for_status()
+
+
+          products = (
+              response
+              .json()
+              .get("value", [])
+          )
+
+
+          print(
+              "Number of Sentinel-2 products:",
+              len(products)
+          )
+
+
+          # ==========================================
+          # استخراج اطلاعات تصاویر
+          # ==========================================
+
+          candidates = []
+
+
+          for product in products:
+
+              attributes = {}
+
+              for attr in product.get(
+                  "Attributes",
+                  []
+              ):
+
+                  name = attr.get(
+                      "Name"
+                  )
+
+                  value = attr.get(
+                      "Value"
+                  )
+
+                  attributes[name] = value
+
+
+              cloud = attributes.get(
+                  "cloudCover"
+              )
+
+
+              try:
+
+                  cloud = float(cloud)
+
+              except:
+
+                  cloud = None
+
+
+              content_date = (
+                  product
+                  .get(
+                      "ContentDate",
+                      {}
+                  )
+                  .get(
+                      "Start"
+                  )
+              )
+
+
+              candidates.append({
+
+                  "id":
+                      product.get("Id"),
+
+                  "name":
+                      product.get("Name"),
+
+                  "date":
+                      content_date,
+
+                  "cloud_cover":
+                      cloud,
+
+                  "product_type":
+                      attributes.get(
+                          "productType"
+                      ),
+
+                  "footprint":
+                      product.get(
+                          "GeoFootprint"
+                      )
+
+              })
+
+
+          # ==========================================
+          # انتخاب بهترین تصویر
+          #
+          # اولویت:
+          # 1- کمترین ابر
+          # 2- جدیدترین تاریخ
+          # ==========================================
+
+          candidates.sort(
+
+              key=lambda x: (
+
+                  x["cloud_cover"]
+                  if x["cloud_cover"]
+                  is not None
+                  else 999,
+
+                  x["date"]
+                  if x["date"]
+                  else ""
+              ),
+
+              reverse=False
+          )
+
+
+          best = None
+
+
+          if candidates:
+
+              # کمترین ابر
+              min_cloud = min(
+
+                  x["cloud_cover"]
+                  for x in candidates
+                  if x["cloud_cover"]
+                  is not None
+              )
+
+
+              same_cloud = [
+
+                  x
+                  for x in candidates
+                  if x["cloud_cover"] ==
+                     min_cloud
+              ]
+
+
+              # اگر چند تصویر ابر مشابه داشتند،
+              # جدیدترین را انتخاب کن
+
+              same_cloud.sort(
+
+                  key=lambda x:
+                      x["date"]
+                      or "",
+
+                  reverse=True
+              )
+
+
+              best = same_cloud[0]
+
+
+          # ==========================================
+          # ساخت پوشه خروجی
+          # ==========================================
+
+          os.makedirs(
+              "data",
+              exist_ok=True
+          )
+
+
+          # ==========================================
+          # اطلاعات نهایی
+          # ==========================================
+
+          output = {
+
+              "updated_at":
+                  datetime.now(
+                      timezone.utc
+                  ).isoformat(),
+
+              "wetland":
+              {
+                  "name":
+                      "Maharloo Wetland",
+
+                  "geometry":
+                      geometry_2d
+              },
+
+              "sentinel2":
+                  best,
+
+              "search":
+              {
+                  "days_back":
+                      DAYS_BACK,
+
+                  "maximum_cloud":
+                      MAX_CLOUD,
+
+                  "products_found":
+                      len(candidates)
+              }
+          }
+
+
+          # ==========================================
+          # ذخیره JSON
+          # ==========================================
+
+          with open(
+
+              OUTPUT_FILE,
+
+              "w",
+
+              encoding="utf-8"
+
+          ) as f:
+
+              json.dump(
+
+                  output,
+
+                  f,
+
+                  ensure_ascii=False,
+
+                  indent=2
+
+              )
+
+
+          print("")
+          print("====================================")
+          print("BEST SENTINEL-2 IMAGE")
+          print("====================================")
+
+          if best:
+
+              print(
+                  "Name:",
+                  best["name"]
+              )
+
+              print(
+                  "Date:",
+                  best["date"]
+              )
+
+              print(
+                  "Cloud:",
+                  best["cloud_cover"],
+                  "%"
+              )
+
+              print(
+                  "Product:",
+                  best["product_type"]
+              )
+
+          else:
+
+              print(
+                  "No suitable Sentinel-2 image found."
+              )
+
+
           PY
+
+
+      # ==========================================
+      # ذخیره نتیجه در GitHub
+      # ==========================================
+
+      - name: Save result
+        run: |
+
+          git config user.name "github-actions"
+
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add data/wetland-data.json
+
+          git diff --cached --quiet || \
+            git commit \
+            -m "Update Sentinel-2 wetland data"
+
+          git push
