@@ -69,18 +69,19 @@
 
         .button {
             width: 100%;
+            margin-top: 12px;
+            padding: 10px;
             border: none;
             border-radius: 8px;
-            padding: 10px;
-            margin-top: 12px;
             background: #0066ff;
             color: white;
             font-family: inherit;
+            font-size: 14px;
             cursor: pointer;
         }
 
         .button.active {
-            background: #0050c8;
+            background: #0050b8;
         }
 
         .info {
@@ -138,11 +139,10 @@
 
 <script>
 
-const map =
-    L.map("map").setView(
-        [29.43, 52.82],
-        10
-    );
+const map = L.map("map").setView(
+    [29.43, 52.82],
+    10
+);
 
 L.tileLayer(
     "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
@@ -160,47 +160,42 @@ let ndwiVisible = false;
 
 
 /* =========================================================
-   بارگذاری سایت
+   شروع سایت
 ========================================================= */
 
 async function loadSite() {
 
     try {
 
-        /* --------------------------------
+        /* -------------------------------------------------
            مرز تالاب
-        -------------------------------- */
+        ------------------------------------------------- */
 
-        const geoResponse =
-            await fetch(
-                "bestar_talab_maharlo.geojson?" +
-                Date.now()
-            );
+        const geoResponse = await fetch(
+            "bestar_talab_maharlo.geojson?" + Date.now()
+        );
 
         if (!geoResponse.ok) {
-
             throw new Error(
                 "فایل مرز تالاب پیدا نشد."
             );
-
         }
 
         const geojson =
             await geoResponse.json();
 
 
-        wetlandLayer =
-            L.geoJSON(
-                geojson,
-                {
-                    style: {
-                        color: "#0066ff",
-                        weight: 3,
-                        fillColor: "#00aaff",
-                        fillOpacity: 0.10
-                    }
+        wetlandLayer = L.geoJSON(
+            geojson,
+            {
+                style: {
+                    color: "#0066ff",
+                    weight: 3,
+                    fillColor: "#00aaff",
+                    fillOpacity: 0.10
                 }
-            ).addTo(map);
+            }
+        ).addTo(map);
 
 
         const wetlandBounds =
@@ -219,88 +214,75 @@ async function loadSite() {
         }
 
 
-        /* --------------------------------
-           اطلاعات
-        -------------------------------- */
+        /* -------------------------------------------------
+           اطلاعات تصویر
+        ------------------------------------------------- */
 
-        const dataResponse =
-            await fetch(
-                "data/wetland-data.json?" +
-                Date.now()
-            );
-
+        const dataResponse = await fetch(
+            "data/wetland-data.json?" + Date.now()
+        );
 
         if (!dataResponse.ok) {
-
             throw new Error(
                 "فایل اطلاعات پیدا نشد."
             );
-
         }
-
 
         const data =
             await dataResponse.json();
 
 
-        document.getElementById(
-            "type"
-        ).textContent =
-            data.image?.type ||
-            "Sentinel-2 L2A";
+        document.getElementById("type").textContent =
+            data.image?.type || "Sentinel-2 L2A";
 
 
-        document.getElementById(
-            "cloud"
-        ).textContent =
+        document.getElementById("cloud").textContent =
             data.image?.max_cloud != null
                 ? data.image.max_cloud + "%"
                 : "---";
 
 
-        document.getElementById(
-            "info"
-        ).style.display =
+        document.getElementById("info").style.display =
             "block";
 
 
-        /* --------------------------------
+        /* -------------------------------------------------
            محدوده تصویر
-        -------------------------------- */
+        ------------------------------------------------- */
 
         const bbox =
-            data.image.bbox;
+            data.image?.bbox;
+
+
+        if (
+            !bbox ||
+            bbox.length !== 4
+        ) {
+
+            throw new Error(
+                "محدوده تصویر مشخص نیست."
+            );
+
+        }
 
 
         const imageBounds = [
-
-            [
-                bbox[1],
-                bbox[0]
-            ],
-
-            [
-                bbox[3],
-                bbox[2]
-            ]
-
+            [bbox[1], bbox[0]],
+            [bbox[3], bbox[2]]
         ];
 
 
-        /* --------------------------------
+        /* -------------------------------------------------
            تصویر اصلی
-        -------------------------------- */
+        ------------------------------------------------- */
 
         const rgbURL =
-            data.image.file +
-            "?" +
+            "data/maharlo_sentinel2.png?" +
             Date.now();
 
 
         const rgbImage =
-            await loadImage(
-                rgbURL
-            );
+            await loadImage(rgbURL);
 
 
         const clippedRGB =
@@ -311,52 +293,65 @@ async function loadSite() {
             );
 
 
-        rgbLayer =
-            L.imageOverlay(
-                clippedRGB,
+        rgbLayer = L.imageOverlay(
+            clippedRGB,
+            imageBounds,
+            {
+                opacity: 0.85
+            }
+        ).addTo(map);
+
+
+        /* -------------------------------------------------
+           NDWI
+           مستقیماً فایل PNG را می‌خوانیم
+        ------------------------------------------------- */
+
+        const ndwiURL =
+            "data/maharlo_ndwi.png?" +
+            Date.now();
+
+
+        try {
+
+            await checkImageExists(
+                ndwiURL
+            );
+
+
+            ndwiLayer = L.imageOverlay(
+                ndwiURL,
                 imageBounds,
                 {
-                    opacity: 0.85
+                    opacity: 0.85,
+                    interactive: false
                 }
-            ).addTo(map);
+            );
 
 
-        /* --------------------------------
-           لایه NDWI
-        -------------------------------- */
-
-        if (
-            data.ndwi &&
-            data.ndwi.file
-        ) {
-
-            const ndwiURL =
-                data.ndwi.file +
-                "?" +
-                Date.now();
+            document.getElementById(
+                "status"
+            ).textContent =
+                "تصویر Sentinel-2 و NDWI آماده هستند.";
 
 
-            ndwiLayer =
-                L.imageOverlay(
-                    ndwiURL,
-                    imageBounds,
-                    {
-                        opacity: 0.85
-                    }
-                );
+        } catch (error) {
 
+            ndwiLayer = null;
+
+            document.getElementById(
+                "status"
+            ).textContent =
+                "تصویر Sentinel-2 آماده است؛ NDWI هنوز در سایت قابل دریافت نیست.";
 
         }
 
 
+        /* -------------------------------------------------
+           مرز تالاب روی همه چیز
+        ------------------------------------------------- */
+
         wetlandLayer.bringToFront();
-
-
-        document.getElementById(
-            "status"
-        ).textContent =
-            "تصویر Sentinel-2 آماده است.";
-
 
     }
 
@@ -373,14 +368,49 @@ async function loadSite() {
             "status"
         ).className =
             "status error";
-
     }
-
 }
 
 
 /* =========================================================
-   نمایش / مخفی کردن NDWI
+   بررسی وجود فایل NDWI
+========================================================= */
+
+function checkImageExists(url) {
+
+    return new Promise(
+        (resolve, reject) => {
+
+            const img =
+                new Image();
+
+            img.onload =
+                function() {
+
+                    resolve(true);
+
+                };
+
+            img.onerror =
+                function() {
+
+                    reject(
+                        new Error(
+                            "NDWI not found"
+                        )
+                    );
+
+                };
+
+            img.src = url;
+
+        }
+    );
+}
+
+
+/* =========================================================
+   دکمه NDWI
 ========================================================= */
 
 function toggleNDWI() {
@@ -388,11 +418,10 @@ function toggleNDWI() {
     if (!ndwiLayer) {
 
         alert(
-            "لایه NDWI هنوز آماده نشده است."
+            "فایل NDWI هنوز در سایت موجود نیست."
         );
 
         return;
-
     }
 
 
@@ -404,16 +433,25 @@ function toggleNDWI() {
 
     if (!ndwiVisible) {
 
+        if (rgbLayer) {
+            map.removeLayer(rgbLayer);
+        }
+
         ndwiLayer.addTo(map);
 
         ndwiVisible = true;
 
         button.textContent =
-            "مخفی کردن NDWI";
+            "نمایش تصویر اصلی";
 
         button.classList.add(
             "active"
         );
+
+        document.getElementById(
+            "status"
+        ).textContent =
+            "نمایش NDWI فعال است.";
 
     }
 
@@ -422,6 +460,10 @@ function toggleNDWI() {
         map.removeLayer(
             ndwiLayer
         );
+
+        if (rgbLayer) {
+            rgbLayer.addTo(map);
+        }
 
         ndwiVisible = false;
 
@@ -432,6 +474,10 @@ function toggleNDWI() {
             "active"
         );
 
+        document.getElementById(
+            "status"
+        ).textContent =
+            "تصویر اصلی Sentinel-2 نمایش داده می‌شود.";
     }
 
 
@@ -451,14 +497,14 @@ function loadImage(url) {
             const image =
                 new Image();
 
+
             image.onload =
                 function() {
 
-                    resolve(
-                        image
-                    );
+                    resolve(image);
 
                 };
+
 
             image.onerror =
                 function() {
@@ -471,17 +517,16 @@ function loadImage(url) {
 
                 };
 
-            image.src =
-                url;
+
+            image.src = url;
 
         }
     );
-
 }
 
 
 /* =========================================================
-   برش تصویر اصلی داخل تالاب
+   بریدن تصویر در مرز تالاب
 ========================================================= */
 
 function createClippedImage(
@@ -541,9 +586,7 @@ function createClippedImage(
         bbox[3];
 
 
-    function lonToX(
-        lon
-    ) {
+    function lonToX(lon) {
 
         return (
             (lon - minLon) /
@@ -553,9 +596,7 @@ function createClippedImage(
     }
 
 
-    function latToY(
-        lat
-    ) {
+    function latToY(lat) {
 
         return (
             (maxLat - lat) /
@@ -592,17 +633,14 @@ function createClippedImage(
 
 
         for (
-            const ring
-            of coordinates
+            const ring of coordinates
         ) {
 
             if (
                 !ring ||
                 ring.length < 3
             ) {
-
                 continue;
-
             }
 
 
@@ -650,7 +688,6 @@ function createClippedImage(
         maskCtx.fill(
             "evenodd"
         );
-
     }
 
 
@@ -695,6 +732,14 @@ function createClippedImage(
 
     }
 
+    else {
+
+        throw new Error(
+            "نوع هندسه تالاب پشتیبانی نمی‌شود."
+        );
+
+    }
+
 
     ctx.globalCompositeOperation =
         "destination-in";
@@ -714,12 +759,11 @@ function createClippedImage(
     return canvas.toDataURL(
         "image/png"
     );
-
 }
 
 
 /* =========================================================
-   شروع
+   اجرا
 ========================================================= */
 
 loadSite();
