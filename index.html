@@ -67,6 +67,22 @@
             color: #b42318;
         }
 
+        .button {
+            width: 100%;
+            border: none;
+            border-radius: 8px;
+            padding: 10px;
+            margin-top: 12px;
+            background: #0066ff;
+            color: white;
+            font-family: inherit;
+            cursor: pointer;
+        }
+
+        .button.active {
+            background: #0050c8;
+        }
+
         .info {
             margin-top: 10px;
             padding-top: 10px;
@@ -87,12 +103,20 @@
 <div class="panel">
 
     <div class="title">
-        آخرین تصویر Sentinel-2
+        پایش تالاب مهارلو
     </div>
 
     <div id="status" class="status">
         در حال بارگذاری...
     </div>
+
+    <button
+        id="ndwiButton"
+        class="button"
+        onclick="toggleNDWI()"
+    >
+        نمایش NDWI
+    </button>
 
     <div id="info" class="info" style="display:none;">
 
@@ -106,11 +130,6 @@
             <b id="cloud">---</b>
         </div>
 
-        <div>
-            بازه جست‌وجو:
-            <b id="days">---</b> روز
-        </div>
-
     </div>
 
 </div>
@@ -119,36 +138,38 @@
 
 <script>
 
-const map = L.map("map").setView(
-    [29.43, 52.82],
-    10
-);
+const map =
+    L.map("map").setView(
+        [29.43, 52.82],
+        10
+    );
 
 L.tileLayer(
     "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
     {
-        attribution: "&copy; OpenStreetMap contributors"
+        attribution:
+            "&copy; OpenStreetMap contributors"
     }
 ).addTo(map);
 
-const statusEl =
-    document.getElementById("status");
 
-const infoEl =
-    document.getElementById("info");
+let wetlandLayer = null;
+let rgbLayer = null;
+let ndwiLayer = null;
+let ndwiVisible = false;
 
-const typeEl =
-    document.getElementById("type");
 
-const cloudEl =
-    document.getElementById("cloud");
-
-const daysEl =
-    document.getElementById("days");
+/* =========================================================
+   بارگذاری سایت
+========================================================= */
 
 async function loadSite() {
 
     try {
+
+        /* --------------------------------
+           مرز تالاب
+        -------------------------------- */
 
         const geoResponse =
             await fetch(
@@ -157,15 +178,18 @@ async function loadSite() {
             );
 
         if (!geoResponse.ok) {
+
             throw new Error(
                 "فایل مرز تالاب پیدا نشد."
             );
+
         }
 
         const geojson =
             await geoResponse.json();
 
-        const wetlandLayer =
+
+        wetlandLayer =
             L.geoJSON(
                 geojson,
                 {
@@ -173,22 +197,31 @@ async function loadSite() {
                         color: "#0066ff",
                         weight: 3,
                         fillColor: "#00aaff",
-                        fillOpacity: 0.12
+                        fillOpacity: 0.10
                     }
                 }
             ).addTo(map);
 
+
         const wetlandBounds =
             wetlandLayer.getBounds();
 
+
         if (wetlandBounds.isValid()) {
+
             map.fitBounds(
                 wetlandBounds,
                 {
                     padding: [20, 20]
                 }
             );
+
         }
+
+
+        /* --------------------------------
+           اطلاعات
+        -------------------------------- */
 
         const dataResponse =
             await fetch(
@@ -196,82 +229,134 @@ async function loadSite() {
                 Date.now()
             );
 
+
         if (!dataResponse.ok) {
+
             throw new Error(
-                "فایل اطلاعات Sentinel-2 پیدا نشد."
+                "فایل اطلاعات پیدا نشد."
             );
+
         }
+
 
         const data =
             await dataResponse.json();
 
-        if (
-            !data.image ||
-            !data.image.file ||
-            !data.image.bbox
-        ) {
-            throw new Error(
-                "اطلاعات تصویر Sentinel-2 کامل نیست."
-            );
-        }
 
-        typeEl.textContent =
-            data.image.type ||
+        document.getElementById(
+            "type"
+        ).textContent =
+            data.image?.type ||
             "Sentinel-2 L2A";
 
-        cloudEl.textContent =
-            data.image.max_cloud != null
+
+        document.getElementById(
+            "cloud"
+        ).textContent =
+            data.image?.max_cloud != null
                 ? data.image.max_cloud + "%"
                 : "---";
 
-        daysEl.textContent =
-            data.image.period_days != null
-                ? data.image.period_days
-                : "---";
 
-        infoEl.style.display =
+        document.getElementById(
+            "info"
+        ).style.display =
             "block";
 
-        const imageURL =
-            data.image.file +
-            "?" +
-            Date.now();
 
-        const image =
-            await loadImage(imageURL);
-
-        const clippedImageURL =
-            createClippedImage(
-                image,
-                geojson,
-                data.image.bbox
-            );
+        /* --------------------------------
+           محدوده تصویر
+        -------------------------------- */
 
         const bbox =
             data.image.bbox;
 
+
         const imageBounds = [
-            [bbox[1], bbox[0]],
-            [bbox[3], bbox[2]]
+
+            [
+                bbox[1],
+                bbox[0]
+            ],
+
+            [
+                bbox[3],
+                bbox[2]
+            ]
+
         ];
 
-        const imageLayer =
+
+        /* --------------------------------
+           تصویر اصلی
+        -------------------------------- */
+
+        const rgbURL =
+            data.image.file +
+            "?" +
+            Date.now();
+
+
+        const rgbImage =
+            await loadImage(
+                rgbURL
+            );
+
+
+        const clippedRGB =
+            createClippedImage(
+                rgbImage,
+                geojson,
+                bbox
+            );
+
+
+        rgbLayer =
             L.imageOverlay(
-                clippedImageURL,
+                clippedRGB,
                 imageBounds,
                 {
-                    opacity: 0.85,
-                    interactive: false
+                    opacity: 0.85
                 }
             ).addTo(map);
 
+
+        /* --------------------------------
+           لایه NDWI
+        -------------------------------- */
+
+        if (
+            data.ndwi &&
+            data.ndwi.file
+        ) {
+
+            const ndwiURL =
+                data.ndwi.file +
+                "?" +
+                Date.now();
+
+
+            ndwiLayer =
+                L.imageOverlay(
+                    ndwiURL,
+                    imageBounds,
+                    {
+                        opacity: 0.85
+                    }
+                );
+
+
+        }
+
+
         wetlandLayer.bringToFront();
 
-        statusEl.textContent =
-            "تصویر Sentinel-2 فقط داخل محدوده تالاب نمایش داده شد.";
 
-        statusEl.className =
-            "status";
+        document.getElementById(
+            "status"
+        ).textContent =
+            "تصویر Sentinel-2 آماده است.";
+
 
     }
 
@@ -279,40 +364,125 @@ async function loadSite() {
 
         console.error(error);
 
-        statusEl.textContent =
+        document.getElementById(
+            "status"
+        ).textContent =
             error.message;
 
-        statusEl.className =
+        document.getElementById(
+            "status"
+        ).className =
             "status error";
+
     }
+
 }
+
+
+/* =========================================================
+   نمایش / مخفی کردن NDWI
+========================================================= */
+
+function toggleNDWI() {
+
+    if (!ndwiLayer) {
+
+        alert(
+            "لایه NDWI هنوز آماده نشده است."
+        );
+
+        return;
+
+    }
+
+
+    const button =
+        document.getElementById(
+            "ndwiButton"
+        );
+
+
+    if (!ndwiVisible) {
+
+        ndwiLayer.addTo(map);
+
+        ndwiVisible = true;
+
+        button.textContent =
+            "مخفی کردن NDWI";
+
+        button.classList.add(
+            "active"
+        );
+
+    }
+
+    else {
+
+        map.removeLayer(
+            ndwiLayer
+        );
+
+        ndwiVisible = false;
+
+        button.textContent =
+            "نمایش NDWI";
+
+        button.classList.remove(
+            "active"
+        );
+
+    }
+
+
+    wetlandLayer.bringToFront();
+}
+
+
+/* =========================================================
+   بارگذاری تصویر
+========================================================= */
 
 function loadImage(url) {
 
     return new Promise(
         (resolve, reject) => {
 
-            const img =
+            const image =
                 new Image();
 
-            img.onload =
+            image.onload =
                 function() {
-                    resolve(img);
+
+                    resolve(
+                        image
+                    );
+
                 };
 
-            img.onerror =
+            image.onerror =
                 function() {
+
                     reject(
                         new Error(
-                            "تصویر Sentinel-2 قابل بارگذاری نیست."
+                            "تصویر قابل بارگذاری نیست."
                         )
                     );
+
                 };
 
-            img.src = url;
+            image.src =
+                url;
+
         }
     );
+
 }
+
+
+/* =========================================================
+   برش تصویر اصلی داخل تالاب
+========================================================= */
 
 function createClippedImage(
     image,
@@ -321,21 +491,33 @@ function createClippedImage(
 ) {
 
     const canvas =
-        document.createElement("canvas");
+        document.createElement(
+            "canvas"
+        );
+
 
     const width =
         image.naturalWidth ||
         image.width;
 
+
     const height =
         image.naturalHeight ||
         image.height;
 
-    canvas.width = width;
-    canvas.height = height;
+
+    canvas.width =
+        width;
+
+    canvas.height =
+        height;
+
 
     const ctx =
-        canvas.getContext("2d");
+        canvas.getContext(
+            "2d"
+        );
+
 
     ctx.drawImage(
         image,
@@ -345,61 +527,98 @@ function createClippedImage(
         height
     );
 
-    const minLon = bbox[0];
-    const minLat = bbox[1];
-    const maxLon = bbox[2];
-    const maxLat = bbox[3];
 
-    function lonToX(lon) {
+    const minLon =
+        bbox[0];
+
+    const minLat =
+        bbox[1];
+
+    const maxLon =
+        bbox[2];
+
+    const maxLat =
+        bbox[3];
+
+
+    function lonToX(
+        lon
+    ) {
 
         return (
             (lon - minLon) /
             (maxLon - minLon)
         ) * width;
+
     }
 
-    function latToY(lat) {
+
+    function latToY(
+        lat
+    ) {
 
         return (
             (maxLat - lat) /
             (maxLat - minLat)
         ) * height;
+
     }
 
-    const maskCanvas =
-        document.createElement("canvas");
 
-    maskCanvas.width = width;
-    maskCanvas.height = height;
+    const maskCanvas =
+        document.createElement(
+            "canvas"
+        );
+
+
+    maskCanvas.width =
+        width;
+
+    maskCanvas.height =
+        height;
+
 
     const maskCtx =
-        maskCanvas.getContext("2d");
+        maskCanvas.getContext(
+            "2d"
+        );
+
 
     function drawPolygon(
-        polygonCoordinates
+        coordinates
     ) {
 
         maskCtx.beginPath();
 
+
         for (
             const ring
-            of polygonCoordinates
+            of coordinates
         ) {
 
             if (
                 !ring ||
                 ring.length < 3
             ) {
+
                 continue;
+
             }
+
 
             const first =
                 ring[0];
 
+
             maskCtx.moveTo(
-                lonToX(first[0]),
-                latToY(first[1])
+                lonToX(
+                    first[0]
+                ),
+                latToY(
+                    first[1]
+                )
             );
+
 
             for (
                 let i = 1;
@@ -410,45 +629,57 @@ function createClippedImage(
                 const point =
                     ring[i];
 
+
                 maskCtx.lineTo(
-                    lonToX(point[0]),
-                    latToY(point[1])
+                    lonToX(
+                        point[0]
+                    ),
+                    latToY(
+                        point[1]
+                    )
                 );
+
             }
 
+
             maskCtx.closePath();
+
         }
 
-        maskCtx.fill("evenodd");
+
+        maskCtx.fill(
+            "evenodd"
+        );
+
     }
+
 
     const feature =
-        geojson.features &&
-        geojson.features.length > 0
-            ? geojson.features[0]
-            : null;
+        geojson.features[0];
 
-    if (!feature) {
-        throw new Error(
-            "هندسه تالاب پیدا نشد."
-        );
-    }
 
     const geometry =
         feature.geometry;
 
-    maskCtx.fillStyle = "#ffffff";
+
+    maskCtx.fillStyle =
+        "#ffffff";
+
 
     if (
-        geometry.type === "Polygon"
+        geometry.type ===
+        "Polygon"
     ) {
 
         drawPolygon(
             geometry.coordinates
         );
 
-    } else if (
-        geometry.type === "MultiPolygon"
+    }
+
+    else if (
+        geometry.type ===
+        "MultiPolygon"
     ) {
 
         for (
@@ -459,17 +690,15 @@ function createClippedImage(
             drawPolygon(
                 polygon
             );
+
         }
 
-    } else {
-
-        throw new Error(
-            "نوع هندسه تالاب پشتیبانی نمی‌شود."
-        );
     }
+
 
     ctx.globalCompositeOperation =
         "destination-in";
+
 
     ctx.drawImage(
         maskCanvas,
@@ -477,13 +706,21 @@ function createClippedImage(
         0
     );
 
+
     ctx.globalCompositeOperation =
         "source-over";
+
 
     return canvas.toDataURL(
         "image/png"
     );
+
 }
+
+
+/* =========================================================
+   شروع
+========================================================= */
 
 loadSite();
 
