@@ -1,274 +1,37 @@
-name: Update Wetland Data
+name: Test Copernicus Login
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 */6 * * *"
 
 jobs:
-  update-wetland:
+  test-copernicus:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Get repository
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install packages
-        run: |
-          pip install requests
-
-      - name: Update Sentinel-2 data
+      - name: Test login
         env:
           CDSE_USERNAME: ${{ secrets.CDSE_USERNAME }}
           CDSE_PASSWORD: ${{ secrets.CDSE_PASSWORD }}
         run: |
-          python <<'PY'
-          import json
+          python - <<'PY'
           import os
           import requests
-          from datetime import datetime, timedelta, timezone
 
-          GEOJSON_FILE = "bestar_talab_maharlo.geojson"
-          OUTPUT_FILE = "data/wetland-data.json"
+          url = "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token"
 
-          TOKEN_URL = (
-              "https://identity.dataspace.copernicus.eu/"
-              "auth/realms/CDSE/protocol/openid-connect/token"
-          )
-
-          CATALOG_URL = (
-              "https://catalogue.dataspace.copernicus.eu/"
-              "odata/v1/Products"
-          )
-
-          # -----------------------------
-          # خواندن مرز تالاب
-          # -----------------------------
-          with open(GEOJSON_FILE, "r", encoding="utf-8") as f:
-              geojson = json.load(f)
-
-          geometry = geojson["features"][0]["geometry"]
-
-          # -----------------------------
-          # پیدا کردن مرکز و محدوده
-          # -----------------------------
-          coordinates = []
-
-          def collect_coords(obj):
-              if (
-                  isinstance(obj, list)
-                  and len(obj) >= 2
-                  and isinstance(obj[0], (int, float))
-                  and isinstance(obj[1], (int, float))
-              ):
-                  coordinates.append((obj[0], obj[1]))
-              elif isinstance(obj, list):
-                  for item in obj:
-                      collect_coords(item)
-
-          collect_coords(geometry["coordinates"])
-
-          min_lon = min(x[0] for x in coordinates)
-          max_lon = max(x[0] for x in coordinates)
-          min_lat = min(x[1] for x in coordinates)
-          max_lat = max(x[1] for x in coordinates)
-
-          center_lon = (min_lon + max_lon) / 2
-          center_lat = (min_lat + max_lat) / 2
-
-          # -----------------------------
-          # دریافت Access Token
-          # -----------------------------
-          token_data = {
+          data = {
               "client_id": "cdse-public",
-              "grant_type": "password",
               "username": os.environ["CDSE_USERNAME"],
               "password": os.environ["CDSE_PASSWORD"],
+              "grant_type": "password"
           }
 
-          token_response = requests.post(
-              TOKEN_URL,
-              data=token_data,
+          response = requests.post(
+              url,
+              data=data,
               timeout=60
           )
 
-          token_response.raise_for_status()
-
-          access_token = token_response.json()["access_token"]
-
-          # -----------------------------
-          # جست‌وجوی Sentinel-2
-          # -----------------------------
-          today = datetime.now(timezone.utc)
-          start = today - timedelta(days=30)
-
-          start_date = start.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-          end_date = today.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-
-          # محدوده مستطیلی اطراف تالاب
-          bbox = (
-              f"{min_lon},{min_lat},"
-              f"{max_lon},{max_lat}"
-          )
-
-          filter_query = (
-              "Collection/Name eq 'SENTINEL-2' "
-              "and ContentDate/Start ge "
-              f"{start_date} "
-              "and ContentDate/Start le "
-              f"{end_date}"
-          )
-
-          params = {
-              "$filter": filter_query,
-              "$top": "50",
-              "$orderby": "ContentDate/Start desc",
-          }
-
-          headers = {
-              "Authorization": f"Bearer {access_token}"
-          }
-
-          response = requests.get(
-              CATALOG_URL,
-              params=params,
-              headers=headers,
-              timeout=60
-          )
-
-          response.raise_for_status()
-
-          products = response.json().get("value", [])
-
-          # -----------------------------
-          # فیلتر محصولات Sentinel-2 L2A
-          # -----------------------------
-          candidates = []
-
-          for product in products:
-
-              name = product.get("Name", "")
-
-              if "MSIL2A" not in name:
-                  continue
-
-              footprint = product.get("Footprint")
-
-              cloud = None
-
-              attrs = product.get("Attributes", [])
-
-              if isinstance(attrs, list):
-                  for attr in attrs:
-                      if not isinstance(attr, dict):
-                          continue
-
-                      if attr.get("Name") in [
-                          "cloudCover",
-                          "cloudCoverPercentage"
-                      ]:
-                          try:
-                              cloud = float(
-                                  attr.get("Value")
-                              )
-                          except:
-                              pass
-
-              candidates.append({
-                  "id": product.get("Id"),
-                  "name": name,
-                  "date": product.get("ContentDate", {}).get("Start"),
-                  "cloud_cover": cloud,
-                  "footprint": footprint,
-              })
-
-          # -----------------------------
-          # انتخاب کم‌ابرترین تصویر
-          # -----------------------------
-          if candidates:
-
-              candidates.sort(
-                  key=lambda x: (
-                      x["cloud_cover"]
-                      if x["cloud_cover"] is not None
-                      else 999
-                  )
-              )
-
-              best = candidates[0]
-
-          else:
-
-              best = None
-
-          # -----------------------------
-          # ذخیره نتیجه
-          # -----------------------------
-          os.makedirs(
-              "data",
-              exist_ok=True
-          )
-
-          output = {
-              "updated_at": datetime.now(
-                  timezone.utc
-              ).isoformat(),
-
-              "wetland": {
-                  "center": {
-                      "latitude": center_lat,
-                      "longitude": center_lon
-                  },
-
-                  "bbox": [
-                      min_lon,
-                      min_lat,
-                      max_lon,
-                      max_lat
-                  ]
-              },
-
-              "sentinel2": best,
-
-              "message":
-                  "Latest suitable Sentinel-2 L2A image"
-          }
-
-          with open(
-              OUTPUT_FILE,
-              "w",
-              encoding="utf-8"
-          ) as f:
-
-              json.dump(
-                  output,
-                  f,
-                  ensure_ascii=False,
-                  indent=2
-              )
-
-          print(
-              json.dumps(
-                  output,
-                  ensure_ascii=False,
-                  indent=2
-              )
-          )
+          print("HTTP STATUS:", response.status_code)
+          print("RESPONSE:", response.text[:1000])
           PY
-
-      - name: Commit updated data
-        run: |
-          git config user.name "github-actions"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git add data/wetland-data.json
-
-          git diff --cached --quiet || \
-            git commit -m "Update wetland Sentinel-2 data"
-
-          git push
