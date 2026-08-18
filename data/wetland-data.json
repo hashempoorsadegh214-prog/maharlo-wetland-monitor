@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-08-18T23:02:46.401184+00:00",
+  "updated_at": "2026-08-18T23:10:36.739465+00:00",
   "image": {
     "file": "data/maharlo_sentinel2.png",
     "bbox": [
@@ -8,14 +8,13 @@
       52.967500549000064,
       29.565711701000094
     ],
+    "type": "Sentinel-2 L2A",
     "max_cloud": 20,
     "period_days": 30,
-    "type": "Sentinel-2 L2A",
     "bands": [
       "B04",
       "B03",
       "B02"
-    ],
-    "clipped": true
+    ]
   }
 }
