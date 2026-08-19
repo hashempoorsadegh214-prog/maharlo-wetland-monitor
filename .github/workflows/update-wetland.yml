@@ -7,6 +7,7 @@ on:
 
 jobs:
   update-wetland:
+
     runs-on: ubuntu-latest
 
     steps:
@@ -52,17 +53,25 @@ jobs:
           from rasterio.features import geometry_mask
 
 
+          # =====================================================
+          # تنظیمات
+          # =====================================================
+
           GEOJSON_FILE = "bestar_talab_maharlo.geojson"
+
           ARCHIVE_DIR = "data/archive"
+
           ARCHIVE_JSON = "data/archive.json"
 
           MAX_CLOUD = 20
+
           DAYS_BACK = 30
+
           WATER_PIXEL_SIZE = 20
 
 
           # =====================================================
-          # پاک کردن آرشیو قبلی
+          # پوشه آرشیو
           # =====================================================
 
           os.makedirs(
@@ -70,7 +79,10 @@ jobs:
               exist_ok=True
           )
 
-          for name in os.listdir(ARCHIVE_DIR):
+
+          for name in os.listdir(
+              ARCHIVE_DIR
+          ):
 
               path = os.path.join(
                   ARCHIVE_DIR,
@@ -78,6 +90,7 @@ jobs:
               )
 
               if os.path.isfile(path):
+
                   os.remove(path)
 
 
@@ -102,6 +115,7 @@ jobs:
 
 
           if wetland.is_empty:
+
               raise Exception(
                   "مرز تالاب معتبر نیست."
               )
@@ -111,6 +125,7 @@ jobs:
               wetland.bounds
           )
 
+
           bbox = [
               min_lon,
               min_lat,
@@ -119,8 +134,14 @@ jobs:
           ]
 
 
+          print(
+              "Wetland BBOX:",
+              bbox
+          )
+
+
           # =====================================================
-          # توکن
+          # دریافت Token
           # =====================================================
 
           token_url = (
@@ -149,6 +170,7 @@ jobs:
               },
 
               timeout=60
+
           )
 
 
@@ -178,11 +200,12 @@ jobs:
 
               "Content-Type":
                   "application/json"
+
           }
 
 
           # =====================================================
-          # جست‌وجوی ۳۰ روز
+          # جستجوی ۳۰ روز گذشته
           # =====================================================
 
           now = datetime.now(
@@ -228,24 +251,36 @@ jobs:
               "sortby": [
 
                   {
+
                       "field":
                           "properties.datetime",
 
                       "direction":
                           "desc"
+
                   }
 
               ],
 
               "limit":
                   100
+
           }
 
 
+          print(
+              "Searching Sentinel-2..."
+          )
+
+
           response = requests.post(
+
               stac_url,
+
               json=stac_request,
+
               timeout=120
+
           )
 
 
@@ -286,27 +321,35 @@ jobs:
 
           for feature in features:
 
-              props = feature.get(
+              properties = feature.get(
                   "properties",
                   {}
               )
 
-              dt = props.get(
+
+              datetime_value = properties.get(
                   "datetime"
               )
 
-              if not dt:
+
+              if not datetime_value:
+
                   continue
 
-              day = dt[:10]
+
+              day = datetime_value[:10]
+
 
               try:
+
                   cloud = float(
-                      props.get(
+                      properties.get(
                           "eo:cloud_cover"
                       )
                   )
+
               except:
+
                   cloud = 999
 
 
@@ -318,13 +361,14 @@ jobs:
                       ),
 
                   "datetime":
-                      dt,
+                      datetime_value,
 
                   "date":
                       day,
 
                   "cloud_cover":
                       cloud
+
               }
 
 
@@ -346,6 +390,7 @@ jobs:
                   x["date"],
 
               reverse=True
+
           )
 
 
@@ -356,26 +401,37 @@ jobs:
 
 
           # =====================================================
-          # UTM 39N
+          # تبدیل UTM
           # =====================================================
 
           to_utm = Transformer.from_crs(
+
               "EPSG:4326",
+
               "EPSG:32639",
+
               always_xy=True
+
           ).transform
 
 
           from_utm = Transformer.from_crs(
+
               "EPSG:32639",
+
               "EPSG:4326",
+
               always_xy=True
+
           ).transform
 
 
           wetland_utm = shp_transform(
+
               to_utm,
+
               wetland
+
           )
 
 
@@ -384,22 +440,29 @@ jobs:
           )
 
 
-          # محدوده واقعی آب را دوباره به WGS84 تبدیل می‌کنیم
+          # محدوده آب را برای نمایش به WGS84 برمی‌گردانیم
+
           water_bbox_geometry = shp_transform(
+
               from_utm,
+
               wetland_utm
+
           )
+
 
           water_min_lon, water_min_lat, water_max_lon, water_max_lat = (
               water_bbox_geometry.bounds
           )
 
 
-          water_display_bbox = [
+          water_bbox = [
+
               water_min_lon,
               water_min_lat,
               water_max_lon,
               water_max_lat
+
           ]
 
 
@@ -416,14 +479,20 @@ jobs:
               return {
 
                   input: [
+
                       "B02",
                       "B03",
                       "B04"
+
                   ],
 
                   output: {
+
                       bands: 3,
-                      sampleType: "AUTO"
+
+                      sampleType:
+                          "AUTO"
+
                   }
 
               };
@@ -436,7 +505,9 @@ jobs:
               return [
 
                   2.5 * sample.B04,
+
                   2.5 * sample.B03,
+
                   2.5 * sample.B02
 
               ];
@@ -459,16 +530,20 @@ jobs:
               return {
 
                   input: [
+
                       "B03",
                       "B08",
                       "B11",
                       "B12"
+
                   ],
 
                   output: {
 
                       bands: 1,
-                      sampleType: "UINT8"
+
+                      sampleType:
+                          "UINT8"
 
                   }
 
@@ -528,7 +603,7 @@ jobs:
 
 
           # =====================================================
-          # پردازش روزها
+          # پردازش هر روز
           # =====================================================
 
           for index, item in enumerate(
@@ -540,43 +615,65 @@ jobs:
 
               cloud = item["cloud_cover"]
 
-              day_start =
-                  day + "T00:00:00Z"
+              day_start = (
+                  day +
+                  "T00:00:00Z"
+              )
 
-              day_end =
-                  day + "T23:59:59Z"
+              day_end = (
+                  day +
+                  "T23:59:59Z"
+              )
 
 
               print("")
               print(
                   "================================"
               )
+
               print(
                   f"{index}/{len(selected_days)}"
               )
+
               print(
                   "DATE:",
                   day
               )
 
+              print(
+                  "CLOUD:",
+                  cloud
+              )
 
-              # ---------------------------------------------
-              # فایل‌ها
-              # ---------------------------------------------
+
+              # =================================================
+              # نام فایل‌ها
+              # =================================================
 
               rgb_file = os.path.join(
+
                   ARCHIVE_DIR,
+
                   f"rgb_{day}.png"
+
               )
+
 
               water_file = os.path.join(
+
                   ARCHIVE_DIR,
+
                   f"water_{day}.png"
+
               )
 
+
               water_tif = os.path.join(
+
                   ARCHIVE_DIR,
+
                   f"water_{day}.tif"
+
               )
 
 
@@ -599,6 +696,7 @@ jobs:
 
                           "bbox":
                               bbox
+
                       },
 
                       "data": [
@@ -622,6 +720,7 @@ jobs:
 
                                   "mosaickingOrder":
                                       "leastCC"
+
                               }
 
                           }
@@ -649,6 +748,7 @@ jobs:
 
                                   "type":
                                       "image/png"
+
                               }
 
                           }
@@ -659,6 +759,7 @@ jobs:
 
                   "evalscript":
                       rgb_evalscript
+
               }
 
 
@@ -671,6 +772,7 @@ jobs:
                   json=rgb_request,
 
                   timeout=300
+
               )
 
 
@@ -720,6 +822,7 @@ jobs:
                               utm_min_y,
                               utm_max_x,
                               utm_max_y
+
                           ]
 
                       },
@@ -745,6 +848,7 @@ jobs:
 
                                   "mosaickingOrder":
                                       "leastCC"
+
                               }
 
                           }
@@ -772,6 +876,7 @@ jobs:
 
                                   "type":
                                       "image/tiff"
+
                               }
 
                           }
@@ -782,6 +887,7 @@ jobs:
 
                   "evalscript":
                       water_evalscript
+
               }
 
 
@@ -794,6 +900,7 @@ jobs:
                   json=water_request,
 
                   timeout=300
+
               )
 
 
@@ -821,7 +928,7 @@ jobs:
 
 
               # =================================================
-              # خواندن GeoTIFF
+              # شمارش پیکسل‌های آب
               # =================================================
 
               with rasterio.open(
@@ -835,7 +942,6 @@ jobs:
                   raster_crs = src.crs
 
 
-              # تبدیل مرز به CRS تصویر
               to_raster = Transformer.from_crs(
 
                   "EPSG:4326",
@@ -847,11 +953,13 @@ jobs:
               ).transform
 
 
-              wetland_raster =
-                  shp_transform(
-                      to_raster,
-                      wetland
-                  )
+              wetland_raster = shp_transform(
+
+                  to_raster,
+
+                  wetland
+
+              )
 
 
               inside_mask = geometry_mask(
@@ -865,6 +973,7 @@ jobs:
                       transform,
 
                   invert=True
+
               )
 
 
@@ -873,29 +982,40 @@ jobs:
                   (water_array > 0)
                   &
                   inside_mask
+
               )
 
 
               water_pixels = int(
+
                   np.count_nonzero(
                       water_mask
                   )
+
               )
 
 
-              water_area_m2 =
-                  water_pixels * \
-                  WATER_PIXEL_SIZE * \
+              water_area_m2 = (
+
+                  water_pixels
+                  *
+                  WATER_PIXEL_SIZE
+                  *
                   WATER_PIXEL_SIZE
 
+              )
 
-              water_area_ha =
-                  water_area_m2 / \
+
+              water_area_ha = (
+
+                  water_area_m2 /
                   10000.0
+
+              )
 
 
               # =================================================
-              # ساخت PNG شفاف
+              # ساخت تصویر آب
               # =================================================
 
               rgba = np.zeros(
@@ -907,6 +1027,7 @@ jobs:
                   ),
 
                   dtype=np.uint8
+
               )
 
 
@@ -941,14 +1062,17 @@ jobs:
               )
 
 
-              # TIFF لازم نیست بماند
+              # =================================================
+              # حذف TIFF
+              # =================================================
+
               os.remove(
                   water_tif
               )
 
 
               # =================================================
-              # ذخیره روز
+              # اطلاعات روز
               # =================================================
 
               archive_items.append({
@@ -972,7 +1096,7 @@ jobs:
                       bbox,
 
                   "water_bbox":
-                      water_display_bbox,
+                      water_bbox,
 
                   "water_pixels":
                       water_pixels,
@@ -982,11 +1106,12 @@ jobs:
                           water_area_ha,
                           2
                       )
+
               })
 
 
               print(
-                  "Water area:",
+                  "WATER AREA:",
                   round(
                       water_area_ha,
                       2
@@ -1005,11 +1130,12 @@ jobs:
                   x["date"],
 
               reverse=True
+
           )
 
 
           # =====================================================
-          # JSON
+          # ذخیره archive.json
           # =====================================================
 
           archive = {
@@ -1032,6 +1158,7 @@ jobs:
 
               "items":
                   archive_items
+
           }
 
 
@@ -1042,20 +1169,27 @@ jobs:
           ) as f:
 
               json.dump(
+
                   archive,
+
                   f,
+
                   ensure_ascii=False,
+
                   indent=2
+
               )
 
 
           # =====================================================
-          # آخرین روز
+          # آخرین تصویر
           # =====================================================
 
           if archive_items:
 
-              latest = archive_items[0]
+              latest =
+                  archive_items[0]
+
 
               shutil.copyfile(
 
@@ -1065,7 +1199,9 @@ jobs:
                   ),
 
                   "data/maharlo_sentinel2.png"
+
               )
+
 
               shutil.copyfile(
 
@@ -1075,6 +1211,7 @@ jobs:
                   ),
 
                   "data/maharlo_water.png"
+
               )
 
 
@@ -1082,13 +1219,18 @@ jobs:
           print(
               "================================"
           )
+
           print(
               "ARCHIVE COMPLETE"
           )
+
           print(
               "AVAILABLE DAYS:",
-              len(archive_items)
+              len(
+                  archive_items
+              )
           )
+
           print(
               "================================"
           )
@@ -1101,8 +1243,7 @@ jobs:
 
           git config user.name "github-actions"
 
-          git config user.email \
-            "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add \
             data/archive.json \
@@ -1112,6 +1253,6 @@ jobs:
 
           git diff --cached --quiet || \
             git commit \
-            -m "Fix archive water map position"
+            -m "Update 30 day wetland archive"
 
           git push
