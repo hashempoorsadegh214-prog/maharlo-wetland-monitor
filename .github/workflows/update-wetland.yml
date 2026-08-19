@@ -7,11 +7,9 @@ on:
 
 jobs:
   update-wetland:
-
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Get repository
         uses: actions/checkout@v4
 
@@ -30,7 +28,6 @@ jobs:
           CDSE_CLIENT_SECRET: ${{ secrets.CDSE_CLIENT_SECRET }}
 
         run: |
-
           python - <<'PY'
 
           import json
@@ -41,7 +38,6 @@ jobs:
           from datetime import datetime, timedelta, timezone
 
           import numpy as np
-
           from PIL import Image
 
           from shapely.geometry import shape, mapping
@@ -71,7 +67,7 @@ jobs:
 
 
           # =====================================================
-          # پوشه آرشیو
+          # آماده‌سازی پوشه
           # =====================================================
 
           os.makedirs(
@@ -79,23 +75,18 @@ jobs:
               exist_ok=True
           )
 
-
-          for name in os.listdir(
-              ARCHIVE_DIR
-          ):
-
-              path = os.path.join(
+          for filename in os.listdir(ARCHIVE_DIR):
+              file_path = os.path.join(
                   ARCHIVE_DIR,
-                  name
+                  filename
               )
 
-              if os.path.isfile(path):
-
-                  os.remove(path)
+              if os.path.isfile(file_path):
+                  os.remove(file_path)
 
 
           # =====================================================
-          # مرز تالاب
+          # خواندن مرز تالاب
           # =====================================================
 
           with open(
@@ -103,9 +94,12 @@ jobs:
               "r",
               encoding="utf-8"
           ) as f:
-
               geojson = json.load(f)
 
+          if not geojson.get("features"):
+              raise Exception(
+                  "فایل GeoJSON فاقد Feature است."
+              )
 
           geometry = geojson["features"][0]["geometry"]
 
@@ -113,18 +107,17 @@ jobs:
               geometry
           ).buffer(0)
 
-
           if wetland.is_empty:
-
               raise Exception(
                   "مرز تالاب معتبر نیست."
               )
 
 
-          min_lon, min_lat, max_lon, max_lat = (
-              wetland.bounds
-          )
+          # =====================================================
+          # محدوده جغرافیایی تالاب
+          # =====================================================
 
+          min_lon, min_lat, max_lon, max_lat = wetland.bounds
 
           bbox = [
               min_lon,
@@ -133,7 +126,6 @@ jobs:
               max_lat
           ]
 
-
           print(
               "Wetland BBOX:",
               bbox
@@ -141,7 +133,7 @@ jobs:
 
 
           # =====================================================
-          # دریافت Token
+          # دریافت Access Token
           # =====================================================
 
           token_url = (
@@ -149,63 +141,38 @@ jobs:
               "auth/realms/CDSE/protocol/openid-connect/token"
           )
 
-
           token_response = requests.post(
-
               token_url,
-
               data={
-                  "grant_type":
-                      "client_credentials",
-
-                  "client_id":
-                      os.environ[
-                          "CDSE_CLIENT_ID"
-                      ],
-
-                  "client_secret":
-                      os.environ[
-                          "CDSE_CLIENT_SECRET"
-                      ]
+                  "grant_type": "client_credentials",
+                  "client_id": os.environ["CDSE_CLIENT_ID"],
+                  "client_secret": os.environ["CDSE_CLIENT_SECRET"]
               },
-
               timeout=60
-
           )
 
-
           if token_response.status_code != 200:
-
               print(
                   token_response.text
               )
-
               raise Exception(
                   "Copernicus authentication failed."
               )
 
+          access_token = token_response.json()["access_token"]
 
-          access_token = (
-              token_response
-              .json()
-              ["access_token"]
+          headers = {
+              "Authorization": "Bearer " + access_token,
+              "Content-Type": "application/json"
+          }
+
+          print(
+              "Copernicus authentication OK"
           )
 
 
-          headers = {
-
-              "Authorization":
-                  "Bearer " +
-                  access_token,
-
-              "Content-Type":
-                  "application/json"
-
-          }
-
-
           # =====================================================
-          # جستجوی ۳۰ روز گذشته
+          # بازه 30 روز گذشته
           # =====================================================
 
           now = datetime.now(
@@ -217,86 +184,61 @@ jobs:
           )
 
 
+          # =====================================================
+          # جست‌وجوی Sentinel-2
+          # =====================================================
+
           stac_url = (
               "https://stac.dataspace.copernicus.eu/"
               "v1/search"
           )
 
-
           stac_request = {
-
               "collections": [
                   "sentinel-2-l2a"
               ],
-
               "datetime":
                   start.isoformat()
                   + "/"
                   + now.isoformat(),
-
               "intersects":
                   mapping(wetland),
-
               "query": {
-
                   "eo:cloud_cover": {
-
-                      "lte":
-                          MAX_CLOUD
-
+                      "lte": MAX_CLOUD
                   }
-
               },
-
               "sortby": [
-
                   {
-
                       "field":
                           "properties.datetime",
-
                       "direction":
                           "desc"
-
                   }
-
               ],
-
-              "limit":
-                  100
-
+              "limit": 100
           }
-
 
           print(
               "Searching Sentinel-2..."
           )
 
-
-          response = requests.post(
-
+          stac_response = requests.post(
               stac_url,
-
               json=stac_request,
-
               timeout=120
-
           )
 
-
-          if response.status_code != 200:
-
+          if stac_response.status_code != 200:
               print(
-                  response.text[:3000]
+                  stac_response.text[:3000]
               )
-
               raise Exception(
                   "STAC search failed."
               )
 
-
           features = (
-              response
+              stac_response
               .json()
               .get(
                   "features",
@@ -304,20 +246,22 @@ jobs:
               )
           )
 
-
           if not features:
-
               raise Exception(
-                  "در ۳۰ روز گذشته تصویر مناسب پیدا نشد."
+                  "در 30 روز گذشته تصویر مناسب پیدا نشد."
               )
+
+          print(
+              "STAC results:",
+              len(features)
+          )
 
 
           # =====================================================
-          # یک تصویر برای هر روز
+          # انتخاب بهترین تصویر هر روز
           # =====================================================
 
           by_day = {}
-
 
           for feature in features:
 
@@ -326,51 +270,36 @@ jobs:
                   {}
               )
 
-
               datetime_value = properties.get(
                   "datetime"
               )
 
-
               if not datetime_value:
-
                   continue
-
 
               day = datetime_value[:10]
 
+              cloud_value = properties.get(
+                  "eo:cloud_cover"
+              )
 
               try:
-
                   cloud = float(
-                      properties.get(
-                          "eo:cloud_cover"
-                      )
+                      cloud_value
                   )
-
               except:
-
-                  cloud = 999
-
+                  cloud = 999.0
 
               item = {
-
                   "id":
-                      feature.get(
-                          "id"
-                      ),
-
+                      feature.get("id"),
                   "datetime":
                       datetime_value,
-
                   "date":
                       day,
-
                   "cloud_cover":
                       cloud
-
               }
-
 
               if (
                   day not in by_day
@@ -378,24 +307,17 @@ jobs:
                   cloud <
                   by_day[day]["cloud_cover"]
               ):
-
                   by_day[day] = item
 
 
           selected_days = sorted(
-
               by_day.values(),
-
-              key=lambda x:
-                  x["date"],
-
+              key=lambda x: x["date"],
               reverse=True
-
           )
 
-
           print(
-              "Available days:",
+              "Available image days:",
               len(selected_days)
           )
 
@@ -405,115 +327,71 @@ jobs:
           # =====================================================
 
           to_utm = Transformer.from_crs(
-
               "EPSG:4326",
-
               "EPSG:32639",
-
               always_xy=True
-
           ).transform
-
 
           from_utm = Transformer.from_crs(
-
               "EPSG:32639",
-
               "EPSG:4326",
-
               always_xy=True
-
           ).transform
 
-
           wetland_utm = shp_transform(
-
               to_utm,
-
               wetland
-
           )
-
 
           utm_min_x, utm_min_y, utm_max_x, utm_max_y = (
               wetland_utm.bounds
           )
 
-
-          # محدوده آب را برای نمایش به WGS84 برمی‌گردانیم
-
           water_bbox_geometry = shp_transform(
-
               from_utm,
-
               wetland_utm
-
           )
-
 
           water_min_lon, water_min_lat, water_max_lon, water_max_lat = (
               water_bbox_geometry.bounds
           )
 
-
           water_bbox = [
-
               water_min_lon,
               water_min_lat,
               water_max_lon,
               water_max_lat
-
           ]
 
 
           # =====================================================
-          # Evalscript RGB
+          # Evalscript تصویر رنگی
           # =====================================================
 
           rgb_evalscript = """
-
           //VERSION=3
 
           function setup() {
-
               return {
-
                   input: [
-
                       "B02",
                       "B03",
                       "B04"
-
                   ],
-
                   output: {
-
                       bands: 3,
-
-                      sampleType:
-                          "AUTO"
-
+                      sampleType: "AUTO"
                   }
-
               };
-
           }
-
 
           function evaluatePixel(sample) {
-
               return [
-
                   2.5 * sample.B04,
-
                   2.5 * sample.B03,
-
                   2.5 * sample.B02
-
               ];
-
           }
-
           """
 
 
@@ -522,82 +400,51 @@ jobs:
           # =====================================================
 
           water_evalscript = """
-
           //VERSION=3
 
           function setup() {
-
               return {
-
                   input: [
-
                       "B03",
                       "B08",
                       "B11",
                       "B12"
-
                   ],
-
                   output: {
-
                       bands: 1,
-
-                      sampleType:
-                          "UINT8"
-
+                      sampleType: "UINT8"
                   }
-
               };
-
           }
-
 
           function evaluatePixel(sample) {
 
               let mndwi =
-                  (
-                      sample.B03 -
-                      sample.B11
-                  )
-                  /
-                  (
-                      sample.B03 +
-                      sample.B11
-                  );
-
+                  (sample.B03 - sample.B11) /
+                  (sample.B03 + sample.B11);
 
               let awei =
-                  4 *
+                  4 * (sample.B03 - sample.B11) -
                   (
-                      sample.B03 -
-                      sample.B11
-                  )
-                  -
-                  (
-                      0.25 *
-                      sample.B08
-                      +
-                      2.75 *
-                      sample.B12
+                      0.25 * sample.B08 +
+                      2.75 * sample.B12
                   );
-
 
               if (
                   awei > -0.1 &&
                   mndwi > 0
               ) {
-
                   return [1];
-
               }
 
-
               return [0];
-
           }
-
           """
 
+
+          # =====================================================
+          # آرشیو نهایی
+          # =====================================================
 
           archive_items = []
 
@@ -615,31 +462,21 @@ jobs:
 
               cloud = item["cloud_cover"]
 
-              day_start = (
-                  day +
-                  "T00:00:00Z"
-              )
+              day_start = day + "T00:00:00Z"
 
-              day_end = (
-                  day +
-                  "T23:59:59Z"
-              )
-
+              day_end = day + "T23:59:59Z"
 
               print("")
               print(
                   "================================"
               )
-
               print(
                   f"{index}/{len(selected_days)}"
               )
-
               print(
                   "DATE:",
                   day
               )
-
               print(
                   "CLOUD:",
                   cloud
@@ -651,138 +488,85 @@ jobs:
               # =================================================
 
               rgb_file = os.path.join(
-
                   ARCHIVE_DIR,
-
                   f"rgb_{day}.png"
-
               )
-
 
               water_file = os.path.join(
-
                   ARCHIVE_DIR,
-
                   f"water_{day}.png"
-
               )
 
-
               water_tif = os.path.join(
-
                   ARCHIVE_DIR,
-
                   f"water_{day}.tif"
-
               )
 
 
               # =================================================
-              # RGB
+              # دریافت RGB
               # =================================================
 
               rgb_request = {
-
                   "input": {
-
                       "bounds": {
-
                           "properties": {
-
                               "crs":
                               "http://www.opengis.net/def/crs/OGC/1.3/CRS84"
-
                           },
-
                           "bbox":
                               bbox
-
                       },
-
                       "data": [
-
                           {
-
                               "type":
                                   "sentinel-2-l2a",
-
                               "dataFilter": {
-
                                   "timeRange": {
-
                                       "from":
                                           day_start,
-
                                       "to":
                                           day_end
-
                                   },
-
                                   "mosaickingOrder":
                                       "leastCC"
-
                               }
-
                           }
-
                       ]
-
                   },
-
                   "output": {
-
                       "width":
                           1200,
-
                       "height":
                           1200,
-
                       "responses": [
-
                           {
-
                               "identifier":
                                   "default",
-
                               "format": {
-
                                   "type":
                                       "image/png"
-
                               }
-
                           }
-
                       ]
-
                   },
-
                   "evalscript":
                       rgb_evalscript
-
               }
 
 
               rgb_response = requests.post(
-
                   "https://sh.dataspace.copernicus.eu/process/v1",
-
                   headers=headers,
-
                   json=rgb_request,
-
                   timeout=300
-
               )
 
 
               if rgb_response.status_code != 200:
 
                   print(
-                      "RGB failed:"
-                  )
-
-                  print(
+                      "RGB failed:",
                       rgb_response.text[:1500]
                   )
 
@@ -800,117 +584,73 @@ jobs:
 
 
               # =================================================
-              # آب
+              # درخواست آب
               # =================================================
 
               water_request = {
-
                   "input": {
-
                       "bounds": {
-
                           "properties": {
-
                               "crs":
                               "http://www.opengis.net/def/crs/EPSG/0/32639"
-
                           },
-
                           "bbox": [
-
                               utm_min_x,
                               utm_min_y,
                               utm_max_x,
                               utm_max_y
-
                           ]
-
                       },
-
                       "data": [
-
                           {
-
                               "type":
                                   "sentinel-2-l2a",
-
                               "dataFilter": {
-
                                   "timeRange": {
-
                                       "from":
                                           day_start,
-
                                       "to":
                                           day_end
-
                                   },
-
                                   "mosaickingOrder":
                                       "leastCC"
-
                               }
-
                           }
-
                       ]
-
                   },
-
                   "output": {
-
                       "resx":
                           WATER_PIXEL_SIZE,
-
                       "resy":
                           WATER_PIXEL_SIZE,
-
                       "responses": [
-
                           {
-
                               "identifier":
                                   "default",
-
                               "format": {
-
                                   "type":
                                       "image/tiff"
-
                               }
-
                           }
-
                       ]
-
                   },
-
                   "evalscript":
                       water_evalscript
-
               }
 
 
               water_response = requests.post(
-
                   "https://sh.dataspace.copernicus.eu/process/v1",
-
                   headers=headers,
-
                   json=water_request,
-
                   timeout=300
-
               )
 
 
               if water_response.status_code != 200:
 
                   print(
-                      "Water failed:"
-                  )
-
-                  print(
+                      "Water failed:",
                       water_response.text[:1500]
                   )
 
@@ -928,7 +668,7 @@ jobs:
 
 
               # =================================================
-              # شمارش پیکسل‌های آب
+              # خواندن GeoTIFF
               # =================================================
 
               with rasterio.open(
@@ -942,112 +682,86 @@ jobs:
                   raster_crs = src.crs
 
 
+              # =================================================
+              # تبدیل مرز تالاب به CRS تصویر
+              # =================================================
+
               to_raster = Transformer.from_crs(
-
                   "EPSG:4326",
-
                   raster_crs,
-
                   always_xy=True
-
               ).transform
 
-
               wetland_raster = shp_transform(
-
                   to_raster,
-
                   wetland
-
               )
 
 
               inside_mask = geometry_mask(
-
                   [wetland_raster],
-
-                  out_shape=
-                      water_array.shape,
-
-                  transform=
-                      transform,
-
+                  out_shape=water_array.shape,
+                  transform=transform,
                   invert=True
-
               )
 
 
               water_mask = (
-
                   (water_array > 0)
                   &
                   inside_mask
-
               )
 
 
-              water_pixels = int(
+              # =================================================
+              # محاسبه مساحت
+              # =================================================
 
+              water_pixels = int(
                   np.count_nonzero(
                       water_mask
                   )
-
               )
-
 
               water_area_m2 = (
-
-                  water_pixels
-                  *
+                  water_pixels *
+                  WATER_PIXEL_SIZE *
                   WATER_PIXEL_SIZE
-                  *
-                  WATER_PIXEL_SIZE
-
               )
 
-
               water_area_ha = (
-
                   water_area_m2 /
                   10000.0
-
               )
 
 
               # =================================================
-              # ساخت تصویر آب
+              # ساخت تصویر شفاف آب
               # =================================================
 
               rgba = np.zeros(
-
                   (
                       water_array.shape[0],
                       water_array.shape[1],
                       4
                   ),
-
                   dtype=np.uint8
-
               )
-
 
               rgba[
                   water_mask,
                   0
               ] = 0
 
-
               rgba[
                   water_mask,
                   1
               ] = 120
 
-
               rgba[
                   water_mask,
                   2
               ] = 255
-
 
               rgba[
                   water_mask,
@@ -1072,42 +786,42 @@ jobs:
 
 
               # =================================================
-              # اطلاعات روز
+              # ذخیره نتیجه همان روز
               # =================================================
 
-              archive_items.append({
+              archive_items.append(
+                  {
+                      "date":
+                          day,
 
-                  "date":
-                      day,
+                      "datetime":
+                          item["datetime"],
 
-                  "datetime":
-                      item["datetime"],
+                      "cloud_cover":
+                          cloud,
 
-                  "cloud_cover":
-                      cloud,
+                      "image":
+                          f"archive/rgb_{day}.png",
 
-                  "image":
-                      f"archive/rgb_{day}.png",
+                      "water_image":
+                          f"archive/water_{day}.png",
 
-                  "water_image":
-                      f"archive/water_{day}.png",
+                      "image_bbox":
+                          bbox,
 
-                  "image_bbox":
-                      bbox,
+                      "water_bbox":
+                          water_bbox,
 
-                  "water_bbox":
-                      water_bbox,
+                      "water_pixels":
+                          water_pixels,
 
-                  "water_pixels":
-                      water_pixels,
-
-                  "water_area_ha":
-                      round(
-                          water_area_ha,
-                          2
-                      )
-
-              })
+                      "water_area_ha":
+                          round(
+                              water_area_ha,
+                              2
+                          )
+                  }
+              )
 
 
               print(
@@ -1125,12 +839,8 @@ jobs:
           # =====================================================
 
           archive_items.sort(
-
-              key=lambda x:
-                  x["date"],
-
+              key=lambda x: x["date"],
               reverse=True
-
           )
 
 
@@ -1139,7 +849,6 @@ jobs:
           # =====================================================
 
           archive = {
-
               "updated_at":
                   datetime.now(
                       timezone.utc
@@ -1158,7 +867,6 @@ jobs:
 
               "items":
                   archive_items
-
           }
 
 
@@ -1169,15 +877,10 @@ jobs:
           ) as f:
 
               json.dump(
-
                   archive,
-
                   f,
-
                   ensure_ascii=False,
-
                   indent=2
-
               )
 
 
@@ -1187,31 +890,26 @@ jobs:
 
           if archive_items:
 
-              latest =
-                  archive_items[0]
+              latest = archive_items[0]
 
-
-              shutil.copyfile(
-
-                  os.path.join(
-                      "data",
-                      latest["image"]
-                  ),
-
-                  "data/maharlo_sentinel2.png"
-
+              latest_rgb = os.path.join(
+                  "data",
+                  latest["image"]
               )
 
+              latest_water = os.path.join(
+                  "data",
+                  latest["water_image"]
+              )
 
               shutil.copyfile(
+                  latest_rgb,
+                  "data/maharlo_sentinel2.png"
+              )
 
-                  os.path.join(
-                      "data",
-                      latest["water_image"]
-                  ),
-
+              shutil.copyfile(
+                  latest_water,
                   "data/maharlo_water.png"
-
               )
 
 
@@ -1219,30 +917,24 @@ jobs:
           print(
               "================================"
           )
-
           print(
               "ARCHIVE COMPLETE"
           )
-
           print(
               "AVAILABLE DAYS:",
               len(
                   archive_items
               )
           )
-
           print(
               "================================"
           )
 
           PY
 
-
       - name: Save archive
         run: |
-
           git config user.name "github-actions"
-
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add \
