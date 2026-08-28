@@ -1,8 +1,8 @@
 {
-  "updated_at": "2026-08-27T21:49:12.192803+00:00",
+  "updated_at": "2026-08-28T09:40:27.800436+00:00",
   "period_days": 30,
   "max_cloud": 20,
-  "available_days": 14,
+  "available_days": 13,
   "items": [
     {
       "date": "2026-08-26",
@@ -262,27 +262,6 @@
       "cloud_cover": 0.01,
       "image": "archive/rgb_2026-07-31.png",
       "water_image": "archive/water_2026-07-31.png",
-      "image_bbox": [
-        52.67413057000009,
-        29.292010746000038,
-        52.967500549000064,
-        29.565711701000094
-      ],
-      "water_bbox": [
-        52.67413057000009,
-        29.29201074600004,
-        52.967500549000064,
-        29.565711701000097
-      ],
-      "water_pixels": 0,
-      "water_area_ha": 0.0
-    },
-    {
-      "date": "2026-07-29",
-      "datetime": "2026-07-29T06:56:21.025000Z",
-      "cloud_cover": 1.0,
-      "image": "archive/rgb_2026-07-29.png",
-      "water_image": "archive/water_2026-07-29.png",
       "image_bbox": [
         52.67413057000009,
         29.292010746000038,
