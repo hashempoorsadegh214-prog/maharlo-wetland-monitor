@@ -1,13 +1,13 @@
 {
-  "updated_at": "2026-10-22T11:12:51.271225+00:00",
+  "updated_at": "2026-10-22T16:41:13.025725+00:00",
   "period_days": 30,
   "max_cloud": 20,
   "available_days": 13,
   "items": [
     {
       "date": "2026-10-22",
-      "datetime": "2026-10-22T07:21:01.024000Z",
-      "cloud_cover": 1.79,
+      "datetime": "2026-10-22T06:59:29.025000Z",
+      "cloud_cover": 1.66,
       "image": "archive/rgb_2026-10-22.png",
       "water_image": "archive/water_2026-10-22.png",
       "image_bbox": [
